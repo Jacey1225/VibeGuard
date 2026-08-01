@@ -4,6 +4,53 @@
 
 ### Added
 
+- GitHub OAuth login (`GET /auth/github/login`, `GET /auth/github/callback`,
+  `POST /auth/logout`): the first authenticated flow in the app. Users
+  authenticate via GitHub (`public_repo` scope only); their OAuth token
+  is encrypted at rest (Fernet) and never returned to a client. Sessions
+  are server-side (bearer token, `SHA-256` hash stored, never the raw
+  token) with a fixed TTL — revocable by deleting the session row, not
+  a stateless JWT, since this feature stores a live GitHub write
+  credential. The OAuth `state` parameter is verified via an httponly
+  cookie before any GitHub call fires, protecting the login redirect
+  against CSRF; the issued session token is delivered to the frontend
+  via a URL fragment, never logged or sent to the server.
+- `POST /repositories/{id}/remediate`: for a scanned repository,
+  generates a proposed fix for every findings-bearing file via
+  DeepSeek V3.1 on OpenRouter — one call per file (all of that file's
+  findings addressed together), full corrected file content back, not
+  a diff (VibeGuard computes the diff itself). Category-specific
+  remediation guidance (`core/remediation_guidance/`) is woven into
+  each prompt, mirroring the heuristic engine's one-module-per-category
+  shape but covering all 10 OWASP categories. Every proposal is
+  re-checked by re-running VibeGuard's own heuristics against the
+  *proposed* content, flagging (not blocking) any newly-introduced
+  category as a safety-net signal for the reviewer. Requires
+  authentication; blocks for the whole request like `/scan`, with the
+  same admit-before-parallelize/bounded-concurrency shape.
+- `GET /repositories/{id}/remediations`: every remediation for a
+  repository, newest first, including the full diff and the model's
+  own summary of the fix. Requires authentication.
+- `POST /remediations/{id}/approve`: approves a remediation and pushes
+  it directly to the target GitHub repository via the Contents API —
+  no pull request, no CI gate; the human diff review at approval time
+  is the whole safety net. Uses the *approving* (authenticated) user's
+  own stored GitHub token, never the original intake submitter's
+  (intake has no user concept). The target branch and the file's blob
+  `sha` are both fetched fresh immediately before the write; a GitHub
+  409 (the file changed upstream) marks the remediation `push_failed` /
+  `stale_sha_conflict` and is never auto-merged. `push_failed` is
+  retryable — re-approving retries the push from scratch with fresh
+  fetches; `pushed`/`rejected` are terminal. Requires authentication.
+- `POST /remediations/{id}/reject`: rejects a proposed or
+  previously-`push_failed` remediation, with an optional reason.
+  Requires authentication.
+- Postgres schema additions via Alembic migration
+  `0003_auth_and_remediation`: `users`, `sessions`, `remediations`
+  (new `remediation_status`/`push_failure_reason` enums), and
+  `remediation_findings` (a join table, not an implicit path match —
+  `vuln_scan.py` hard-deletes and reinserts findings on every rescan,
+  which would otherwise silently re-associate or orphan a remediation).
 - `POST /repositories`: submit a public GitHub repository URL for intake.
   Validates the URL (must be a `github.com/<owner>/<repo>` reference),
   confirms the repository is public via the GitHub API, shallow-clones
@@ -17,3 +64,29 @@
   `rejection_reason`, so every submission attempt is queryable.
 - Postgres schema (`repositories`, `repository_files`) via Alembic
   migration `0001_initial_schema`.
+- MkDocs documentation site (`mkdocs.yml` + `docs/`, Material theme):
+  overview, getting-started, API reference, and development pages.
+  Run with `mkdocs serve` after `pip install -e ".[docs]"`.
+- `POST /repositories/{id}/scan`: runs the vulnerability scan engine
+  against a repository's stored files. A hybrid pipeline — cheap local
+  regex heuristics run over every file across 6 directly-matchable
+  OWASP categories plus a broader entry-point heuristic covering
+  broken auth/access-control/logging; only files that match get one
+  confirmation call each to DeepSeek V3.1 via OpenRouter (bounded
+  concurrency, capped total calls per scan). Dependency/CVE scanning
+  (category 9) is handled without an LLM call — VibeGuard flags
+  manifest/lockfile presence and points at a dedicated SCA tool.
+  Blocks for the whole scan; a second scan replaces prior findings.
+  Total LLM-call failure marks the repository `scan_failed` rather than
+  reporting a false-clean scan; partial failures or a reached call cap
+  set `scan_incomplete` on an otherwise-`scanned` repository.
+- `GET /repositories/{id}/findings`: every finding for a repository,
+  worst severity first.
+- Postgres schema additions via Alembic migration `0002_scan_engine`:
+  `findings` table, extended `repository_status` enum
+  (`scanning`/`scanned`/`scan_failed`), and `scan_incomplete` /
+  `scan_incomplete_reason` / `scan_failure_reason` columns on
+  `repositories`.
+- Repository file-ingestion now reads admitted files concurrently
+  (bounded thread pool) instead of sequentially — an amendment to the
+  original intake feature, since disk reads there are I/O-bound.

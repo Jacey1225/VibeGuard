@@ -32,6 +32,9 @@ def test_repository_response_builds_from_orm_like_object():
         total_files_stored = 0
         total_files_skipped = 0
         total_bytes_stored = 0
+        scan_incomplete = False
+        scan_incomplete_reason = None
+        scan_failure_reason = None
         created_at = datetime.now(UTC)
         updated_at = datetime.now(UTC)
 

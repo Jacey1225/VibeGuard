@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 import vibeguard.engine.intake as intake_module
-from tests.conftest import make_mock_github_client
+from tests.conftest import make_mock_http_client
 from vibeguard.adapters.config.settings import Settings
 from vibeguard.adapters.github.client import GitHubApiUnavailableError
 from vibeguard.adapters.github.clone import CloneFailedError
@@ -43,7 +43,7 @@ def _mock_github(
             return httpx.Response(status_code)
         return httpx.Response(200, json={"private": private, "size": size_kb})
 
-    return make_mock_github_client(handler)
+    return make_mock_http_client(handler)
 
 
 def test_submit_repository_happy_path_returns_201(
@@ -82,7 +82,7 @@ def test_submit_repository_github_unavailable_returns_502(db_session: Session, s
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectTimeout("timed out", request=request)
 
-    client = TestClient(_build_test_app(db_session, make_mock_github_client(handler), settings))
+    client = TestClient(_build_test_app(db_session, make_mock_http_client(handler), settings))
     response = client.post("/repositories", json={"repo_url": "https://github.com/octocat/Hello-World"})
 
     assert response.status_code == 502

@@ -10,6 +10,9 @@ class RepositoryStatus(StrEnum):
     CLONING = "cloning"
     STORING = "storing"
     SCAN_PENDING_IMPLEMENTATION = "scan_pending_implementation"
+    SCANNING = "scanning"
+    SCANNED = "scanned"
+    SCAN_FAILED = "scan_failed"
     REJECTED = "rejected"
 
 
@@ -20,6 +23,12 @@ class RejectionReason(StrEnum):
     REPO_TOO_LARGE = "repo_too_large"
     CLONE_FAILED = "clone_failed"
     CLONE_TIMEOUT = "clone_timeout"
+
+
+class ScanFailureReason(StrEnum):
+    """Why a vulnerability scan failed outright (not merely incomplete)."""
+
+    LLM_UNAVAILABLE = "llm_unavailable"
 
 
 class SkipReason(StrEnum):

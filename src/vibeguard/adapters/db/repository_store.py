@@ -6,7 +6,16 @@ from sqlalchemy.orm import Session
 from vibeguard.adapters.db.models import RepositoryFileModel, RepositoryModel
 from vibeguard.core.file_filter import SkippedFile, StoredFile
 from vibeguard.core.github_url import GitHubRepoRef
-from vibeguard.core.repository_status import RejectionReason, RepositoryStatus
+from vibeguard.core.repository_status import (
+    RejectionReason,
+    RepositoryStatus,
+    ScanFailureReason,
+)
+
+
+def get_repository_by_id(session: Session, repository_id: int) -> RepositoryModel | None:
+    """Fetch a repository by id, or `None` if it doesn't exist."""
+    return session.get(RepositoryModel, repository_id)
 
 
 def insert_repository(session: Session, ref: GitHubRepoRef, source_url: str) -> RepositoryModel:
@@ -69,6 +78,23 @@ def bulk_insert_repository_files(
     ]
     if rows:
         session.execute(insert(RepositoryFileModel), rows)
+
+
+def update_repository_scan_outcome(
+    session: Session,
+    repository: RepositoryModel,
+    status: RepositoryStatus,
+    scan_incomplete: bool,
+    scan_incomplete_reason: str | None,
+    scan_failure_reason: ScanFailureReason | None,
+) -> RepositoryModel:
+    """Finalize a scan's outcome: status, incompleteness, and failure reason."""
+    repository.status = status
+    repository.scan_incomplete = scan_incomplete
+    repository.scan_incomplete_reason = scan_incomplete_reason
+    repository.scan_failure_reason = scan_failure_reason
+    session.flush()
+    return repository
 
 
 def update_repository_counts(

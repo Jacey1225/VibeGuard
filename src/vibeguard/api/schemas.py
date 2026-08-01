@@ -1,10 +1,10 @@
-"""Request and response bodies for the repository intake endpoint."""
+"""Request and response bodies for the repository intake/scan record."""
 
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from vibeguard.core.repository_status import RejectionReason, RepositoryStatus
+from vibeguard.core.repository_status import RejectionReason, RepositoryStatus, ScanFailureReason
 
 
 class RepositorySubmitRequest(BaseModel):
@@ -14,7 +14,7 @@ class RepositorySubmitRequest(BaseModel):
 
 
 class RepositoryResponse(BaseModel):
-    """The persisted state of one repository intake attempt."""
+    """The persisted state of one repository, shared by intake and scan endpoints."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -29,5 +29,8 @@ class RepositoryResponse(BaseModel):
     total_files_stored: int
     total_files_skipped: int
     total_bytes_stored: int
+    scan_incomplete: bool
+    scan_incomplete_reason: str | None
+    scan_failure_reason: ScanFailureReason | None
     created_at: datetime
     updated_at: datetime

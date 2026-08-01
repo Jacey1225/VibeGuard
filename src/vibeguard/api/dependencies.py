@@ -21,6 +21,12 @@ def get_github_client(request: Request) -> Client:
     return client
 
 
+def get_llm_client(request: Request) -> Client:
+    """Return the app's shared httpx client for OpenRouter LLM calls."""
+    client: Client = request.app.state.llm_client
+    return client
+
+
 def get_settings(request: Request) -> Settings:
     """Return the app's loaded settings."""
     settings: Settings = request.app.state.settings

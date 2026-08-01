@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 import vibeguard.engine.intake as intake_module
-from tests.conftest import make_mock_github_client
+from tests.conftest import make_mock_http_client
 from vibeguard.adapters.db.models import RepositoryModel
 from vibeguard.adapters.github.client import GitHubApiUnavailableError
 from vibeguard.adapters.github.clone import CloneFailedError, CloneTimeoutError
@@ -26,7 +26,7 @@ def _github_client(
             return httpx.Response(status_code)
         return httpx.Response(200, json={"private": private, "size": size_kb})
 
-    return make_mock_github_client(handler)
+    return make_mock_http_client(handler)
 
 
 def _redirect_clone_to(monkeypatch: pytest.MonkeyPatch, source: Path) -> None:
@@ -57,7 +57,7 @@ def test_run_intake_github_unavailable_raises_and_persists_no_row(
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectTimeout("timed out", request=request)
 
-    client = make_mock_github_client(handler)
+    client = make_mock_http_client(handler)
 
     with pytest.raises(GitHubApiUnavailableError):
         run_intake("https://github.com/octocat/Hello-World", db_session, client, settings)

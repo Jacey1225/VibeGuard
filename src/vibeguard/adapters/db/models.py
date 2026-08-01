@@ -10,7 +10,6 @@ fulfilled without" case the single-purpose-cascade rule allows.
 from __future__ import annotations
 
 from datetime import datetime
-from enum import StrEnum
 
 from sqlalchemy import (
     BigInteger,
@@ -28,15 +27,17 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-from vibeguard.core.repository_status import RejectionReason, RepositoryStatus, SkipReason
+from vibeguard.adapters.db.enum_column import enum_values
+from vibeguard.core.repository_status import (
+    RejectionReason,
+    RepositoryStatus,
+    ScanFailureReason,
+    SkipReason,
+)
 
 
 class Base(DeclarativeBase):
     """Shared declarative base for all VibeGuard ORM models."""
-
-
-def _enum_values(enum_cls: type[StrEnum]) -> list[str]:
-    return [member.value for member in enum_cls]
 
 
 class RepositoryModel(Base):
@@ -56,12 +57,12 @@ class RepositoryModel(Base):
     owner: Mapped[str] = mapped_column(String(255), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[RepositoryStatus] = mapped_column(
-        Enum(RepositoryStatus, name="repository_status", values_callable=_enum_values),
+        Enum(RepositoryStatus, name="repository_status", values_callable=enum_values),
         nullable=False,
         default=RepositoryStatus.PENDING,
     )
     rejection_reason: Mapped[RejectionReason | None] = mapped_column(
-        Enum(RejectionReason, name="rejection_reason", values_callable=_enum_values),
+        Enum(RejectionReason, name="rejection_reason", values_callable=enum_values),
         nullable=True,
     )
     files_truncated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -69,6 +70,12 @@ class RepositoryModel(Base):
     total_files_stored: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     total_files_skipped: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     total_bytes_stored: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    scan_incomplete: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    scan_incomplete_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    scan_failure_reason: Mapped[ScanFailureReason | None] = mapped_column(
+        Enum(ScanFailureReason, name="scan_failure_reason", values_callable=enum_values),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -98,7 +105,7 @@ class RepositoryFileModel(Base):
     content: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_skipped: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     skip_reason: Mapped[SkipReason | None] = mapped_column(
-        Enum(SkipReason, name="skip_reason", values_callable=_enum_values),
+        Enum(SkipReason, name="skip_reason", values_callable=enum_values),
         nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -112,7 +112,9 @@ def _ingest_and_finalize(
     budget = IngestBudget(
         max_file_count=settings.max_file_count, max_total_bytes=settings.max_total_size_bytes
     )
-    summary = ingest_clone_tree(clone_dir, settings.max_file_size_bytes, budget)
+    summary = ingest_clone_tree(
+        clone_dir, settings.max_file_size_bytes, budget, settings.ingest_thread_pool_size
+    )
     bulk_insert_repository_files(session, repository.id, summary.stored, summary.skipped)
     update_repository_counts(
         session,

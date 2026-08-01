@@ -37,6 +37,25 @@ workaround, a subtle invariant); well-named code shouldn't need them.
   scan, how to add a new rule. If a change makes any of these stale,
   update the README in the same change — not as a follow-up.
 
+## MkDocs site
+
+- The project's documentation site is built with MkDocs (`mkdocs.yml` +
+  `docs/`, Material theme) — this is the standing tool for user-facing
+  docs, not a one-off. Any change that would make the README stale
+  (install/setup, how to run something, a new or changed endpoint/CLI
+  command, a new architectural concept worth explaining) makes the
+  corresponding `docs/*.md` page stale too — update both in the same
+  change, not as a follow-up.
+- `docs/api.md` is the source of truth for endpoint request/response
+  shapes, status values, and HTTP status codes — every new or changed
+  route gets its table/example updated here, not just a mention in the
+  README.
+- `mkdocs build --strict` must pass before calling a documentation
+  change done — broken internal links/nav references fail the build
+  loudly instead of shipping a quietly-broken page.
+- `site/` (the build output) is gitignored — never hand-edit it or
+  commit it; it's generated from `docs/` on demand.
+
 ## Rule/check catalog
 
 - Once there's more than a handful of rules, maintain a single catalog

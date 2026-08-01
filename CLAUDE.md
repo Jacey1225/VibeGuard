@@ -10,8 +10,8 @@ early on — must adhere to these six project skills.
 - [.claude/skills/architecture/SKILL.md](.claude/skills/architecture/SKILL.md) — file/module layout, layering, naming, single-purpose cascade.
 - [.claude/skills/code-security/SKILL.md](.claude/skills/code-security/SKILL.md) — secure coding for VibeGuard's own code (distinct from the findings VibeGuard reports about scanned code).
 - [.claude/skills/testing-standards/SKILL.md](.claude/skills/testing-standards/SKILL.md) — what needs tests and how.
-- [.claude/skills/documentation-standards/SKILL.md](.claude/skills/documentation-standards/SKILL.md) — docstrings, README, rule catalog, changelog.
-- [.claude/skills/feature-approval/SKILL.md](.claude/skills/feature-approval/SKILL.md) — plan-and-confirm gate before implementing any new feature (not bugfixes/refactors).
+- [.claude/skills/documentation-standards/SKILL.md](.claude/skills/documentation-standards/SKILL.md) — docstrings, README, rule catalog, changelog, and the MkDocs site (`mkdocs.yml` + `docs/`).
+- [.claude/skills/feature-approval/SKILL.md](.claude/skills/feature-approval/SKILL.md) — plan-and-scope gate before implementing any new feature (not bugfixes/refactors). The user has granted standing authorization to execute once scoped — no per-feature go-ahead needed; see that file's authorization note for its exact boundary (implementation work only, not pushes/force-push/destructive git ops).
 - [.claude/skills/search-sort-efficiency/SKILL.md](.claude/skills/search-sort-efficiency/SKILL.md) — data structure/algorithm choices for any search, lookup, or sort over findings/rules/files.
 
 **Every feature request must go through `feature-approval` first** —

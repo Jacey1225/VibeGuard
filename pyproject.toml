@@ -12,6 +12,7 @@ dependencies = [
     "psycopg[binary]==3.2.3",
     "alembic==1.14.0",
     "httpx==0.28.1",
+    "cryptography==44.0.0",
 ]
 
 [project.optional-dependencies]
@@ -23,6 +24,10 @@ dev = [
     "freezegun==1.5.1",
     "ruff==0.8.4",
     "mypy==1.13.0",
+]
+docs = [
+    "mkdocs==1.6.1",
+    "mkdocs-material==9.5.49",
 ]
 
 [build-system]
@@ -46,6 +51,17 @@ select = ["E", "F", "I", "UP", "B", "S"]
 [tool.ruff.lint.per-file-ignores]
 # `assert` is how pytest expresses expectations; S101 doesn't apply.
 "tests/**" = ["S101"]
+# These exercise the auth/remediation persistence layer, whose real
+# parameter names (`github_oauth_token_ciphertext`, `token_hash`, etc.)
+# contain "token"/"password"-shaped substrings that trip S105/S106 on
+# fixture literals like "ciphertext-a" or "hash-a" -- not real secrets.
+"tests/adapters/db/test_user_store.py" = ["S105", "S106"]
+"tests/adapters/db/test_session_store.py" = ["S105", "S106"]
+"tests/adapters/db/test_remediation_store.py" = ["S105", "S106"]
+"tests/adapters/db/test_user_model.py" = ["S105", "S106"]
+"tests/adapters/db/test_remediation_model.py" = ["S105", "S106"]
+"tests/api/routes/test_auth.py" = ["S105", "S106"]
+"tests/api/routes/test_remediations.py" = ["S105", "S106", "S107"]
 
 [tool.ruff.lint.flake8-bugbear]
 # FastAPI's Depends(...)-as-default-argument is the framework's own

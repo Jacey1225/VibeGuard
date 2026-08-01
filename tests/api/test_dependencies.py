@@ -6,8 +6,14 @@ import httpx
 from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 
+from tests.conftest import REQUIRED_SETTINGS_KWARGS
 from vibeguard.adapters.config.settings import Settings
-from vibeguard.api.dependencies import get_db_session, get_github_client, get_settings
+from vibeguard.api.dependencies import (
+    get_db_session,
+    get_github_client,
+    get_llm_client,
+    get_settings,
+)
 
 
 def _fake_request(**state: object) -> SimpleNamespace:
@@ -23,8 +29,17 @@ def test_get_github_client_returns_the_shared_client():
         client.close()
 
 
+def test_get_llm_client_returns_the_shared_client():
+    client = httpx.Client()
+    try:
+        request = _fake_request(llm_client=client)
+        assert get_llm_client(request) is client
+    finally:
+        client.close()
+
+
 def test_get_settings_returns_the_shared_settings():
-    settings = Settings(database_url="postgresql+psycopg://localhost/db")
+    settings = Settings(**REQUIRED_SETTINGS_KWARGS)
     request = _fake_request(settings=settings)
     assert get_settings(request) is settings
 
