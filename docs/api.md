@@ -175,6 +175,119 @@ broken by file path, then line number).
 | No repository with this id | `404` |
 | Findings returned (empty list if none) | `200` |
 
+## `POST /snippets`
+
+Submit plain-text code for scanning -- the counterpart to `POST
+/repositories` for callers who have source code in hand rather than a
+GitHub URL. No external service call is involved, so the request
+returns immediately.
+
+### Request body
+
+```json
+{
+  "content": "password = \"admin\"",
+  "filename": "app.py"
+}
+```
+
+`filename` is optional and purely a display label attached to any
+findings produced -- it has no effect on which heuristics run (they're
+content-based, not extension-based). Omit it and a default filename is
+used instead.
+
+### Response body
+
+```json
+{
+  "id": 1,
+  "filename": "app.py",
+  "size_bytes": 19,
+  "status": "scan_pending",
+  "rejection_reason": null,
+  "scan_incomplete": false,
+  "scan_incomplete_reason": null,
+  "scan_failure_reason": null,
+  "created_at": "2026-08-01T00:14:35.697317-07:00",
+  "updated_at": "2026-08-01T00:14:35.697317-07:00"
+}
+```
+
+### Status values
+
+| `status` | Meaning |
+|---|---|
+| `pending` | Never observed in the response -- validation is synchronous. |
+| `scan_pending` | Stored successfully, not yet scanned. |
+| `scanning` | A scan is in progress (transient -- never observed in a response). |
+| `scanned` | A scan completed. See `GET /findings` for results, and `scan_incomplete` below. |
+| `scan_failed` | Every attempted LLM call during the scan failed. See `scan_failure_reason`. |
+| `rejected` | Intake stopped short. See `rejection_reason`. |
+
+### Rejection reasons
+
+| `rejection_reason` | Meaning |
+|---|---|
+| `empty_content` | `content` was empty or whitespace-only. |
+| `too_large` | `content` exceeds the configured per-file size budget (`max_file_size_bytes` -- the same limit that bounds one repository file's content, not a separate setting). A too-large submission is rejected without its content being stored. |
+
+### HTTP status codes
+
+| Condition | HTTP status |
+|---|---|
+| Missing `content` field | `422` |
+| Submitted (accepted or rejected) | `201` |
+
+### Known limitation: request body size
+
+Unlike repository intake (which only ever receives a URL string), the
+full `content` string arrives in the request body before any size
+check runs -- there's no framework-level body-size limit in front of
+this endpoint today, so a very large request body is still fully
+buffered before `max_file_size_bytes` gets a chance to reject it. This
+is the same characteristic every POST endpoint in this API already has
+(no route has an ASGI-level body cap), not something specific to
+snippets.
+
+## `POST /snippets/{id}/scan`
+
+Run a vulnerability scan against a snippet already stored via intake.
+Reuses the same heuristic-then-LLM engine as `POST
+/repositories/{id}/scan` (see `engine/llm_confirmation.py`), minus the
+dependency-manifest check -- that heuristic looks for a manifest or
+lockfile *filename* across a whole file tree, which doesn't apply to a
+single pasted blob. The request **blocks for the whole scan**, the same
+trade-off `POST /repositories/{id}/scan` makes.
+
+Calling this a second time **replaces** the snippet's prior findings.
+
+### Response body
+
+Same shape as `POST /snippets`' response, with the scan-relevant fields
+populated -- see `POST /repositories/{id}/scan` above for what
+`scan_incomplete` means.
+
+### HTTP status codes
+
+| Condition | HTTP status |
+|---|---|
+| No snippet with this id | `404` |
+| Snippet isn't in a scannable status (`rejected`) | `409` |
+| Scan runs (regardless of outcome -- `scanned` or `scan_failed`) | `200` |
+
+## `GET /snippets/{id}/findings`
+
+Return every finding for a snippet, worst severity first (ties broken
+by file path, then line number) -- identical ordering and response
+shape to `GET /repositories/{id}/findings` above.
+
+### HTTP status codes
+
+| Condition | HTTP status |
+|---|---|
+| No snippet with this id | `404` |
+| Findings returned (empty list if none) | `200` |
+
 ## `GET /auth/github/login`
 
 Redirects the browser to GitHub's OAuth consent screen, requesting
@@ -386,7 +499,9 @@ remediation — no GitHub call is made.
 Scanning uses a hybrid approach: cheap pattern-matching runs over every
 stored file locally, and **only files that match a pattern** are sent
 to a third-party LLM provider (OpenRouter, routing to DeepSeek) for
-confirmation and remediation guidance. This means:
+confirmation and remediation guidance. Plain-text snippets (`POST
+/snippets`) go through the identical hybrid pipeline, treated as a
+single file. This means:
 
 - Not every file's content leaves VibeGuard's infrastructure — only the
   subset flagged by the local heuristics.

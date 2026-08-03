@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-import vibeguard.engine.vuln_scan as vuln_scan_module
+import vibeguard.engine.llm_confirmation as llm_confirmation_module
 from vibeguard.adapters.config.settings import Settings
 from vibeguard.adapters.db.models import RepositoryFileModel, RepositoryModel
 from vibeguard.api.dependencies import get_db_session, get_llm_client, get_settings
@@ -103,7 +103,9 @@ def test_scan_repository_happy_path_returns_200_and_findings(
         source=FindingSource.HEURISTIC_CONFIRMED,
         model="test-model",
     )
-    monkeypatch.setattr(vuln_scan_module, "confirm_findings", Mock(return_value=[fake_finding]))
+    monkeypatch.setattr(
+        llm_confirmation_module, "confirm_findings", Mock(return_value=[fake_finding])
+    )
 
     client = TestClient(_build_test_app(db_session, httpx.Client(), settings_factory()))
     response = client.post(f"/repositories/{repository.id}/scan")
@@ -160,7 +162,7 @@ def test_list_findings_returns_worst_first(
             )
         ]
 
-    monkeypatch.setattr(vuln_scan_module, "confirm_findings", fake_confirm_findings)
+    monkeypatch.setattr(llm_confirmation_module, "confirm_findings", fake_confirm_findings)
 
     client = TestClient(_build_test_app(db_session, httpx.Client(), settings_factory()))
     scan_response = client.post(f"/repositories/{repository.id}/scan")

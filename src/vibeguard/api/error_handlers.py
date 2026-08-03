@@ -40,6 +40,16 @@ async def handle_repository_not_ready_for_remediation(
     return JSONResponse(status_code=409, content={"detail": str(exc)})
 
 
+async def handle_snippet_not_found(request: Request, exc: Exception) -> JSONResponse:
+    """Return 404 when the requested snippet id doesn't exist."""
+    return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+
+async def handle_snippet_not_ready_for_scan(request: Request, exc: Exception) -> JSONResponse:
+    """Return 409 when the snippet isn't in a status that allows scanning."""
+    return JSONResponse(status_code=409, content={"detail": str(exc)})
+
+
 async def handle_unauthenticated(request: Request, exc: Exception) -> JSONResponse:
     """Return 401 when a request's bearer token is missing, invalid, or expired."""
     return JSONResponse(status_code=401, content={"detail": str(exc)})

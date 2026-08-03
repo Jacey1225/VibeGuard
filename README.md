@@ -8,7 +8,10 @@ VibeGuard takes in a public GitHub repository, stores its contents, and
 scans it for security issues.
 
 1. **Intake** — submit a repository URL; VibeGuard validates it, clones
-   it, and persists every file's contents to Postgres.
+   it, and persists every file's contents to Postgres. Alternatively,
+   submit a single file's worth of code directly as plain text via
+   `POST /snippets` — see [Scanning a plain-text snippet](#scanning-a-plain-text-snippet)
+   below.
 2. **Scan** — a hybrid heuristic-then-LLM pipeline checks the stored
    files against 10 OWASP-aligned vulnerability categories. Cheap local
    pattern matching runs over every file; only files that match get
@@ -90,6 +93,26 @@ The scan request blocks until every flagged file has been reviewed —
 see [API Reference](docs/api.md) for status values, the
 `scan_incomplete` field, and a note on request duration for large
 repositories.
+
+## Scanning a plain-text snippet
+
+The same scan engine also accepts code submitted directly as text,
+without a GitHub repository:
+
+```bash
+curl -X POST http://localhost:8000/snippets \
+  -H "Content-Type: application/json" \
+  -d '{"content": "password = \"admin\"", "filename": "app.py"}'
+curl -X POST http://localhost:8000/snippets/1/scan
+curl http://localhost:8000/snippets/1/findings
+```
+
+`filename` is optional and purely a display label — the heuristics run
+identically regardless of what (or whether) it's set. A snippet is
+bounded by the same per-file size limit as one repository file; an
+empty or oversized submission comes back `rejected` instead of
+`scan_pending`. See [API Reference](docs/api.md) for the full status
+and rejection-reason tables.
 
 ## Generating and pushing a remediation
 

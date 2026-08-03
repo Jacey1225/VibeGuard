@@ -7,6 +7,7 @@ from unittest.mock import Mock
 import pytest
 from sqlalchemy.orm import Session
 
+import vibeguard.engine.llm_confirmation as llm_confirmation_module
 import vibeguard.engine.vuln_scan as vuln_scan_module
 from vibeguard.adapters.db.finding_store import list_findings_for_repository
 from vibeguard.adapters.db.models import RepositoryFileModel, RepositoryModel
@@ -65,7 +66,7 @@ def test_run_scan_clean_files_never_call_the_llm(
     db_session.flush()
 
     call_spy = Mock(return_value=[])
-    monkeypatch.setattr(vuln_scan_module, "confirm_findings", call_spy)
+    monkeypatch.setattr(llm_confirmation_module, "confirm_findings", call_spy)
 
     run_scan(repository, db_session, llm_client=object(), settings=settings_factory())
 
@@ -85,7 +86,7 @@ def test_run_scan_multi_category_file_triggers_exactly_one_call(
     db_session.flush()
 
     call_spy = Mock(return_value=[])
-    monkeypatch.setattr(vuln_scan_module, "confirm_findings", call_spy)
+    monkeypatch.setattr(llm_confirmation_module, "confirm_findings", call_spy)
 
     run_scan(repository, db_session, llm_client=object(), settings=settings_factory())
 
@@ -100,7 +101,9 @@ def test_run_scan_persists_confirmed_findings(
     db_session.flush()
 
     monkeypatch.setattr(
-        vuln_scan_module, "confirm_findings", Mock(return_value=[_fake_finding("flagged.py")])
+        llm_confirmation_module,
+        "confirm_findings",
+        Mock(return_value=[_fake_finding("flagged.py")]),
     )
 
     updated = run_scan(repository, db_session, llm_client=object(), settings=settings_factory())
@@ -144,7 +147,7 @@ def test_run_scan_one_failing_call_does_not_abort_the_rest(
             raise LlmApiUnavailableError("simulated")
         return [_fake_finding("b.py")]
 
-    monkeypatch.setattr(vuln_scan_module, "confirm_findings", fake_confirm_findings)
+    monkeypatch.setattr(llm_confirmation_module, "confirm_findings", fake_confirm_findings)
 
     updated = run_scan(repository, db_session, llm_client=object(), settings=settings_factory())
 
@@ -166,7 +169,7 @@ def test_run_scan_total_llm_failure_sets_scan_failed(
     def always_fails(result, content, client, api_key, model, timeout_seconds, max_tokens):
         raise LlmApiUnavailableError("simulated")
 
-    monkeypatch.setattr(vuln_scan_module, "confirm_findings", always_fails)
+    monkeypatch.setattr(llm_confirmation_module, "confirm_findings", always_fails)
 
     updated = run_scan(repository, db_session, llm_client=object(), settings=settings_factory())
 
@@ -184,7 +187,7 @@ def test_run_scan_caps_llm_calls_and_marks_incomplete(
     db_session.flush()
 
     call_spy = Mock(return_value=[])
-    monkeypatch.setattr(vuln_scan_module, "confirm_findings", call_spy)
+    monkeypatch.setattr(llm_confirmation_module, "confirm_findings", call_spy)
 
     settings = settings_factory(max_llm_calls_per_scan=2)
     updated = run_scan(repository, db_session, llm_client=object(), settings=settings)
@@ -202,12 +205,12 @@ def test_run_scan_rescan_replaces_prior_findings(
     db_session.flush()
 
     monkeypatch.setattr(
-        vuln_scan_module, "confirm_findings", Mock(return_value=[_fake_finding("a.py")])
+        llm_confirmation_module, "confirm_findings", Mock(return_value=[_fake_finding("a.py")])
     )
     run_scan(repository, db_session, llm_client=object(), settings=settings_factory())
     assert len(list_findings_for_repository(db_session, repository.id)) == 1
 
-    monkeypatch.setattr(vuln_scan_module, "confirm_findings", Mock(return_value=[]))
+    monkeypatch.setattr(llm_confirmation_module, "confirm_findings", Mock(return_value=[]))
     run_scan(repository, db_session, llm_client=object(), settings=settings_factory())
 
     assert list_findings_for_repository(db_session, repository.id) == []
@@ -220,7 +223,7 @@ def test_run_scan_includes_dependency_manifest_finding(
     _add_file(db_session, repository, "requirements.txt", "fastapi==0.115.6\n")
     db_session.flush()
 
-    monkeypatch.setattr(vuln_scan_module, "confirm_findings", Mock(return_value=[]))
+    monkeypatch.setattr(llm_confirmation_module, "confirm_findings", Mock(return_value=[]))
 
     run_scan(repository, db_session, llm_client=object(), settings=settings_factory())
 
@@ -252,7 +255,7 @@ def test_run_scan_respects_max_concurrent_llm_calls(
             active -= 1
         return []
 
-    monkeypatch.setattr(vuln_scan_module, "confirm_findings", fake_confirm_findings)
+    monkeypatch.setattr(llm_confirmation_module, "confirm_findings", fake_confirm_findings)
 
     settings = settings_factory(max_concurrent_llm_calls=3)
     run_scan(repository, db_session, llm_client=object(), settings=settings)

@@ -37,6 +37,8 @@ def test_alembic_upgrade_head_creates_expected_schema(
             "sessions",
             "remediations",
             "remediation_findings",
+            "snippets",
+            "snippet_findings",
         } <= tables
 
         repo_file_fks = inspector.get_foreign_keys("repository_files")
@@ -60,6 +62,14 @@ def test_alembic_upgrade_head_creates_expected_schema(
         remediation_findings_fks = inspector.get_foreign_keys("remediation_findings")
         assert any(fk["referred_table"] == "remediations" for fk in remediation_findings_fks)
         assert any(fk["referred_table"] == "findings" for fk in remediation_findings_fks)
+
+        snippet_finding_fks = inspector.get_foreign_keys("snippet_findings")
+        assert any(fk["referred_table"] == "snippets" for fk in snippet_finding_fks)
+
+        snippets_columns = {col["name"] for col in inspector.get_columns("snippets")}
+        assert {"content", "filename", "size_bytes", "status", "rejection_reason"} <= (
+            snippets_columns
+        )
     finally:
         engine.dispose()
 
@@ -78,7 +88,14 @@ def test_alembic_upgrade_head_creates_expected_schema(
     try:
         inspector = inspect(engine)
         tables = set(inspector.get_table_names())
-        assert {"users", "sessions", "remediations", "remediation_findings"} <= tables
+        assert {
+            "users",
+            "sessions",
+            "remediations",
+            "remediation_findings",
+            "snippets",
+            "snippet_findings",
+        } <= tables
     finally:
         engine.dispose()
 

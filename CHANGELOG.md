@@ -4,6 +4,22 @@
 
 ### Added
 
+- `POST /snippets`, `POST /snippets/{id}/scan`, `GET /snippets/{id}/findings`:
+  a plain-text counterpart to the repository pipeline — submit code
+  directly as a string (with an optional `filename` label) instead of a
+  GitHub URL, then run it through the same heuristic-then-LLM scan
+  engine. The budget-cap/LLM-confirmation/completion-status logic was
+  extracted out of `vuln_scan.py` into `engine/llm_confirmation.py` so
+  both pipelines share it rather than duplicating it. No
+  dependency-manifest check here (that heuristic looks for a
+  manifest/lockfile *filename* across a whole file tree, which doesn't
+  apply to one pasted blob) and no remediation support yet. A snippet
+  is bounded by the same `max_file_size_bytes` limit as one repository
+  file — deliberately not a new setting — and an oversized submission
+  is rejected without its content ever being persisted. Postgres schema
+  additions via Alembic migration `0004_snippet_scan`: `snippets`,
+  `snippet_findings` (reusing the existing `vuln_category`/`severity`/
+  `finding_source` enums).
 - GitHub OAuth login (`GET /auth/github/login`, `GET /auth/github/callback`,
   `POST /auth/logout`): the first authenticated flow in the app. Users
   authenticate via GitHub (`public_repo` scope only); their OAuth token
