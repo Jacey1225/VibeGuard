@@ -2,7 +2,6 @@ import { useState } from "react";
 import { GithubIcon, PasteIcon } from "../icons";
 
 interface SourceMenuProps {
-  onConnectGithub: () => void;
   onPasteExample: () => void;
   repoUrlInput: string;
   repoUrlLoading: boolean;
@@ -30,7 +29,6 @@ const itemBaseStyle = {
 
 /** Popup below the composer's "+" button: connect a GitHub repo or paste example code. */
 export function SourceMenu({
-  onConnectGithub,
   onPasteExample,
   repoUrlInput,
   repoUrlLoading,

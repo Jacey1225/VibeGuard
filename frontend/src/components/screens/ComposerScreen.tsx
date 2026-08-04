@@ -356,7 +356,6 @@ export function ComposerScreen({ state, actions }: ComposerScreenProps) {
 
           {state.sourceMenuOpen && (
             <SourceMenu
-              onConnectGithub={actions.connectGithub}
               onPasteExample={actions.pasteExample}
               repoUrlInput={state.repoUrlInput}
               repoUrlLoading={state.repoUrlLoading}

@@ -1,8 +1,7 @@
 import { useMemo } from "react";
 import type { VibecheckState } from "../../hooks/useVibecheckFlow";
-import type { RepositoryFile } from "../../hooks/useVibecheckFlow";
 import { useVibecheckFlow } from "../../hooks/useVibecheckFlow";
-import { FILES, SCAN_MESSAGES } from "../../data/fixtures";
+import { SCAN_MESSAGES } from "../../data/fixtures";
 import { detectLanguage } from "../../utils/detectLanguage";
 import { FileIcon, SpinnerIcon } from "../icons";
 

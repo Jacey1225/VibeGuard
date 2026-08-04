@@ -12,8 +12,9 @@ export function AttachmentChips({ files }: AttachmentChipsProps) {
 
   return (
     <div style={{ display: "flex", alignItems: "stretch", gap: 10, flexWrap: "wrap" }}>
-      {attachments.map((file, idx) => {
+      {attachments.map((file) => {
         const isEllipsis = "isEllipsis" in file && file.isEllipsis;
+        const languageLabel = "lang" in file ? file.lang : file.language;
 
         return (
           <div
@@ -60,7 +61,7 @@ export function AttachmentChips({ files }: AttachmentChipsProps) {
                   </span>
                 </div>
                 <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "rgba(255,255,255,0.35)", marginTop: 8 }}>
-                  {file.language || "File"}
+                  {languageLabel || "File"}
                 </span>
               </>
             )}
