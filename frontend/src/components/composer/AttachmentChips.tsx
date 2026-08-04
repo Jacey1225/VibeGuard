@@ -8,13 +8,13 @@ interface AttachmentChipsProps {
 
 /** File preview chips shown in the composer once a repo is connected. */
 export function AttachmentChips({ files }: AttachmentChipsProps) {
-  const attachments = files && files.length > 0 ? files : FILES.slice(0, 3);
+  const attachments: RepositoryFile[] =
+    files && files.length > 0 ? files : FILES.slice(0, 3).map((f) => ({ name: f.short, language: f.lang }));
 
   return (
     <div style={{ display: "flex", alignItems: "stretch", gap: 10, flexWrap: "wrap" }}>
       {attachments.map((file) => {
         const isEllipsis = "isEllipsis" in file && file.isEllipsis;
-        const languageLabel = "lang" in file ? file.lang : file.language;
 
         return (
           <div
@@ -61,7 +61,7 @@ export function AttachmentChips({ files }: AttachmentChipsProps) {
                   </span>
                 </div>
                 <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "rgba(255,255,255,0.35)", marginTop: 8 }}>
-                  {languageLabel || "File"}
+                  {file.language || "File"}
                 </span>
               </>
             )}
