@@ -53,12 +53,17 @@ def run_heuristics(relative_path: str, content: str) -> HeuristicScanResult | No
 
     return HeuristicScanResult(
         relative_path=relative_path,
-        categories=_dedupe_categories_in_order(all_hits),
+        categories=dedupe_categories_in_order(all_hits),
         hits=tuple(all_hits),
     )
 
 
-def _dedupe_categories_in_order(hits: list[HeuristicHit]) -> tuple[VulnCategory, ...]:
+def dedupe_categories_in_order(hits: list[HeuristicHit]) -> tuple[VulnCategory, ...]:
+    """Return the distinct categories among `hits`, in first-seen order.
+
+    Shared with `core/heuristics/category_filter.py`, which re-derives
+    a result's category list after dropping non-selected-category hits.
+    """
     seen: set[VulnCategory] = set()
     ordered: list[VulnCategory] = []
     for hit in hits:

@@ -158,3 +158,43 @@ def test_run_snippet_scan_rescan_replaces_prior_findings(
     run_snippet_scan(snippet, db_session, llm_client=object(), settings=settings_factory())
 
     assert list_findings_for_snippet(db_session, snippet.id) == []
+
+
+def test_run_snippet_scan_with_selected_categories_skips_non_matching_content(
+    db_session: Session, settings_factory, monkeypatch: pytest.MonkeyPatch
+):
+    snippet = _make_snippet(db_session, 'API_KEY = "sk_live_abcdef1234567890"')
+
+    call_spy = Mock(return_value=[])
+    monkeypatch.setattr(llm_confirmation_module, "confirm_findings", call_spy)
+
+    run_snippet_scan(
+        snippet,
+        db_session,
+        llm_client=object(),
+        settings=settings_factory(),
+        selected_categories=frozenset({VulnCategory.INJECTION}),
+    )
+
+    call_spy.assert_not_called()
+
+
+def test_run_snippet_scan_with_selected_categories_still_confirms_matching_content(
+    db_session: Session, settings_factory, monkeypatch: pytest.MonkeyPatch
+):
+    snippet = _make_snippet(db_session, 'password = "admin"')
+
+    call_spy = Mock(return_value=[_fake_finding()])
+    monkeypatch.setattr(llm_confirmation_module, "confirm_findings", call_spy)
+
+    updated = run_snippet_scan(
+        snippet,
+        db_session,
+        llm_client=object(),
+        settings=settings_factory(),
+        selected_categories=frozenset({VulnCategory.SECURITY_MISCONFIGURATION}),
+    )
+
+    assert call_spy.call_count == 1
+    assert updated.status == SnippetStatus.SCANNED
+    assert len(list_findings_for_snippet(db_session, snippet.id)) == 1

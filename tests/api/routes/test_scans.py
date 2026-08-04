@@ -116,6 +116,45 @@ def test_scan_repository_happy_path_returns_200_and_findings(
     assert body["scan_incomplete"] is False
 
 
+def test_scan_repository_with_empty_categories_list_returns_422(
+    db_session: Session, settings_factory
+):
+    repository = _make_repository(db_session, RepositoryStatus.SCAN_PENDING_IMPLEMENTATION)
+    db_session.commit()
+    client = TestClient(_build_test_app(db_session, httpx.Client(), settings_factory()))
+
+    response = client.post(f"/repositories/{repository.id}/scan", json={"categories": []})
+
+    assert response.status_code == 422
+
+
+def test_scan_repository_with_selected_categories_only_activates_those(
+    db_session: Session, settings_factory, monkeypatch: pytest.MonkeyPatch
+):
+    repository = _make_repository(db_session, RepositoryStatus.SCAN_PENDING_IMPLEMENTATION)
+    db_session.add(
+        RepositoryFileModel(
+            repository_id=repository.id,
+            relative_path="a.py",
+            size_bytes=20,
+            content='API_KEY = "sk_live_abcdef1234567890"',
+        )
+    )
+    db_session.commit()
+
+    call_spy = Mock(return_value=[])
+    monkeypatch.setattr(llm_confirmation_module, "confirm_findings", call_spy)
+
+    client = TestClient(_build_test_app(db_session, httpx.Client(), settings_factory()))
+    response = client.post(
+        f"/repositories/{repository.id}/scan",
+        json={"categories": ["injection"]},
+    )
+
+    assert response.status_code == 200
+    call_spy.assert_not_called()
+
+
 def test_list_findings_unknown_repository_returns_404(db_session: Session, settings_factory):
     client = TestClient(_build_test_app(db_session, httpx.Client(), settings_factory()))
 

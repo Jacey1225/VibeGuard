@@ -93,6 +93,27 @@ Calling this a second time **replaces** the repository's prior
 findings — there's no scan history in the current version; `GET
 /findings` always reflects the latest scan.
 
+### Request body (optional)
+
+```json
+{
+  "categories": ["injection", "xss"]
+}
+```
+
+`categories` selects which of the 10 `VulnCategory` values to scan
+for — only files whose heuristic hits fall in the selected set are
+activated at all (never sent to the LLM, never appear as findings);
+everything else in the pipeline (the LLM confirmation call, the
+per-scan call-budget cap) applies only to that narrowed set. The
+dependency-manifest check (`vulnerable_dependencies`) only runs if
+that category is selected. **Omit `categories`, or the whole body, to
+scan every category** — this is the default and matches the endpoint's
+behavior before this field existed. Since remediation
+(`POST /repositories/{id}/remediate`) only ever proposes fixes for
+findings that exist, it implicitly inherits whatever category
+selection the last scan used.
+
 ### Response body
 
 Same shape as `POST /repositories`' response (the repository record),
@@ -113,6 +134,7 @@ with the scan-relevant fields populated:
 
 | Condition | HTTP status |
 |---|---|
+| `categories` provided as an explicit empty list | `422` |
 | No repository with this id | `404` |
 | Repository isn't in a scannable status (still cloning, or `rejected`) | `409` |
 | Scan runs (regardless of outcome — `scanned` or `scan_failed`) | `200` |
@@ -261,6 +283,17 @@ trade-off `POST /repositories/{id}/scan` makes.
 
 Calling this a second time **replaces** the snippet's prior findings.
 
+### Request body (optional)
+
+Same shape and semantics as `POST /repositories/{id}/scan`'s
+`categories` field above -- omit it to scan every category.
+
+```json
+{
+  "categories": ["injection", "xss"]
+}
+```
+
 ### Response body
 
 Same shape as `POST /snippets`' response, with the scan-relevant fields
@@ -271,6 +304,7 @@ populated -- see `POST /repositories/{id}/scan` above for what
 
 | Condition | HTTP status |
 |---|---|
+| `categories` provided as an explicit empty list | `422` |
 | No snippet with this id | `404` |
 | Snippet isn't in a scannable status (`rejected`) | `409` |
 | Scan runs (regardless of outcome -- `scanned` or `scan_failed`) | `200` |

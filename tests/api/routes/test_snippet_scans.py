@@ -100,6 +100,37 @@ def test_scan_snippet_happy_path_returns_200_and_findings(
     assert body["scan_incomplete"] is False
 
 
+def test_scan_snippet_with_empty_categories_list_returns_422(
+    db_session: Session, settings_factory
+):
+    snippet = _make_snippet(db_session, SnippetStatus.SCAN_PENDING)
+    db_session.commit()
+    client = TestClient(_build_test_app(db_session, httpx.Client(), settings_factory()))
+
+    response = client.post(f"/snippets/{snippet.id}/scan", json={"categories": []})
+
+    assert response.status_code == 422
+
+
+def test_scan_snippet_with_selected_categories_only_activates_those(
+    db_session: Session, settings_factory, monkeypatch: pytest.MonkeyPatch
+):
+    # Default fixture content is `password = "admin"`, a
+    # security_misconfiguration hit -- selecting only injection must
+    # never call the LLM.
+    snippet = _make_snippet(db_session, SnippetStatus.SCAN_PENDING)
+    db_session.commit()
+
+    call_spy = Mock(return_value=[])
+    monkeypatch.setattr(llm_confirmation_module, "confirm_findings", call_spy)
+
+    client = TestClient(_build_test_app(db_session, httpx.Client(), settings_factory()))
+    response = client.post(f"/snippets/{snippet.id}/scan", json={"categories": ["injection"]})
+
+    assert response.status_code == 200
+    call_spy.assert_not_called()
+
+
 def test_list_snippet_findings_unknown_snippet_returns_404(db_session: Session, settings_factory):
     client = TestClient(_build_test_app(db_session, httpx.Client(), settings_factory()))
 

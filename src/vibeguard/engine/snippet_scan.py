@@ -25,9 +25,11 @@ from vibeguard.adapters.db.snippet_store import (
     update_snippet_scan_outcome,
     update_snippet_status,
 )
+from vibeguard.core.heuristics.category_filter import filter_to_categories
 from vibeguard.core.heuristics.run_heuristics import run_heuristics
 from vibeguard.core.repository_status import ScanFailureReason
 from vibeguard.core.snippet_status import SnippetStatus
+from vibeguard.core.vuln_category import VulnCategory
 from vibeguard.engine.llm_confirmation import (
     ScanOutcome,
     cap_to_call_budget,
@@ -50,9 +52,17 @@ _SCANNABLE_STATUSES = frozenset(
 
 
 def run_snippet_scan_for_id(
-    snippet_id: int, session: Session, llm_client: httpx.Client, settings: Settings
+    snippet_id: int,
+    session: Session,
+    llm_client: httpx.Client,
+    settings: Settings,
+    selected_categories: frozenset[VulnCategory] | None = None,
 ) -> SnippetModel:
     """Look up a snippet, verify it's scannable, and run its scan.
+
+    `selected_categories=None` scans every category (the default);
+    otherwise only the given categories are activated — see
+    `core/heuristics/category_filter.py`.
 
     Raises:
         SnippetNotFoundError: no snippet with this id exists.
@@ -66,7 +76,7 @@ def run_snippet_scan_for_id(
         raise SnippetNotReadyForScanError(
             f"snippet {snippet_id} has status {snippet.status.value}, not ready to scan"
         )
-    return run_snippet_scan(snippet, session, llm_client, settings)
+    return run_snippet_scan(snippet, session, llm_client, settings, selected_categories)
 
 
 def get_findings_for_snippet(snippet_id: int, session: Session) -> list[SnippetFindingModel]:
@@ -82,17 +92,25 @@ def get_findings_for_snippet(snippet_id: int, session: Session) -> list[SnippetF
 
 
 def run_snippet_scan(
-    snippet: SnippetModel, session: Session, llm_client: httpx.Client, settings: Settings
+    snippet: SnippetModel,
+    session: Session,
+    llm_client: httpx.Client,
+    settings: Settings,
+    selected_categories: frozenset[VulnCategory] | None = None,
 ) -> SnippetModel:
     """Run the full vulnerability scan for one plain-text snippet.
 
     Replaces any prior findings for this snippet -- rescans overwrite,
     they don't accumulate, the same rule repository rescans follow.
+    `selected_categories=None` scans every category; otherwise only the
+    given categories are activated.
     """
     update_snippet_status(session, snippet, SnippetStatus.SCANNING)
 
     content = snippet.content or ""
     heuristic_result = run_heuristics(snippet.filename, content)
+    if heuristic_result is not None:
+        heuristic_result = filter_to_categories(heuristic_result, selected_categories)
     heuristic_results = [heuristic_result] if heuristic_result is not None else []
 
     admitted, files_over_cap = cap_to_call_budget(

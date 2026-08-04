@@ -4,6 +4,20 @@
 
 ### Added
 
+- `POST /repositories/{id}/scan` and `POST /snippets/{id}/scan` now
+  accept an optional request body, `{"categories": [...]}`, selecting
+  which of the 10 `VulnCategory` values to scan for. Filtering happens
+  before the LLM-confirmation step (`core/heuristics/category_filter.py`):
+  a file whose heuristic hits fall entirely outside the selected
+  categories is never sent to the LLM at all, not just excluded from
+  the output. The repository pipeline's dependency-manifest check
+  (`vulnerable_dependencies`) is likewise skipped unless that category
+  is selected. Omitting `categories` (or the whole body) scans every
+  category, unchanged from before this field existed; an explicit empty
+  list is rejected (`422`) rather than silently scanning nothing.
+  Remediation isn't touched directly — it only ever proposes fixes for
+  findings that exist, so it automatically inherits whatever category
+  selection the preceding scan used.
 - `POST /snippets`, `POST /snippets/{id}/scan`, `GET /snippets/{id}/findings`:
   a plain-text counterpart to the repository pipeline — submit code
   directly as a string (with an optional `filename` label) instead of a

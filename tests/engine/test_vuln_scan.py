@@ -233,6 +233,97 @@ def test_run_scan_includes_dependency_manifest_finding(
     assert findings[0].source == FindingSource.HEURISTIC_ONLY
 
 
+def test_run_scan_with_selected_categories_skips_files_matching_only_other_categories(
+    db_session: Session, settings_factory, monkeypatch: pytest.MonkeyPatch
+):
+    repository = _make_repository(db_session)
+    _add_file(db_session, repository, "secret.py", 'API_KEY = "sk_live_abcdef1234567890"')
+    db_session.flush()
+
+    call_spy = Mock(return_value=[])
+    monkeypatch.setattr(llm_confirmation_module, "confirm_findings", call_spy)
+
+    run_scan(
+        repository,
+        db_session,
+        llm_client=object(),
+        settings=settings_factory(),
+        selected_categories=frozenset({VulnCategory.INJECTION}),
+    )
+
+    call_spy.assert_not_called()
+
+
+def test_run_scan_with_selected_categories_still_confirms_matching_files(
+    db_session: Session, settings_factory, monkeypatch: pytest.MonkeyPatch
+):
+    repository = _make_repository(db_session)
+    _add_file(
+        db_session,
+        repository,
+        "multi.py",
+        'cursor.execute(f"SELECT * FROM t WHERE id = {x}")\nAPI_KEY = "sk_live_abcdef1234567890"',
+    )
+    db_session.flush()
+
+    call_spy = Mock(return_value=[_fake_finding("multi.py")])
+    monkeypatch.setattr(llm_confirmation_module, "confirm_findings", call_spy)
+
+    run_scan(
+        repository,
+        db_session,
+        llm_client=object(),
+        settings=settings_factory(),
+        selected_categories=frozenset({VulnCategory.INJECTION}),
+    )
+
+    assert call_spy.call_count == 1
+    confirmed_categories = call_spy.call_args.args[0].categories
+    assert confirmed_categories == (VulnCategory.INJECTION,)
+
+
+def test_run_scan_excludes_dependency_manifest_finding_when_category_not_selected(
+    db_session: Session, settings_factory, monkeypatch: pytest.MonkeyPatch
+):
+    repository = _make_repository(db_session)
+    _add_file(db_session, repository, "requirements.txt", "fastapi==0.115.6\n")
+    db_session.flush()
+
+    monkeypatch.setattr(llm_confirmation_module, "confirm_findings", Mock(return_value=[]))
+
+    run_scan(
+        repository,
+        db_session,
+        llm_client=object(),
+        settings=settings_factory(),
+        selected_categories=frozenset({VulnCategory.INJECTION}),
+    )
+
+    assert list_findings_for_repository(db_session, repository.id) == []
+
+
+def test_run_scan_includes_dependency_manifest_finding_when_category_selected(
+    db_session: Session, settings_factory, monkeypatch: pytest.MonkeyPatch
+):
+    repository = _make_repository(db_session)
+    _add_file(db_session, repository, "requirements.txt", "fastapi==0.115.6\n")
+    db_session.flush()
+
+    monkeypatch.setattr(llm_confirmation_module, "confirm_findings", Mock(return_value=[]))
+
+    run_scan(
+        repository,
+        db_session,
+        llm_client=object(),
+        settings=settings_factory(),
+        selected_categories=frozenset({VulnCategory.VULNERABLE_DEPENDENCIES}),
+    )
+
+    findings = list_findings_for_repository(db_session, repository.id)
+    assert len(findings) == 1
+    assert findings[0].category == VulnCategory.VULNERABLE_DEPENDENCIES
+
+
 def test_run_scan_respects_max_concurrent_llm_calls(
     db_session: Session, settings_factory, monkeypatch: pytest.MonkeyPatch
 ):

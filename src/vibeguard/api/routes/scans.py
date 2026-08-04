@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from vibeguard.adapters.config.settings import Settings
 from vibeguard.api.dependencies import get_db_session, get_llm_client, get_settings
 from vibeguard.api.finding_schemas import FindingListResponse, FindingResponse
+from vibeguard.api.scan_schemas import ScanRequest
 from vibeguard.api.schemas import RepositoryResponse
 from vibeguard.engine.vuln_scan import get_findings_for_repository, run_scan_for_repository
 
@@ -16,6 +17,7 @@ router = APIRouter()
 @router.post("/repositories/{repository_id}/scan", response_model=RepositoryResponse)
 def scan_repository(
     repository_id: int,
+    body: ScanRequest | None = None,
     session: Session = Depends(get_db_session),
     llm_client: httpx.Client = Depends(get_llm_client),
     settings: Settings = Depends(get_settings),
@@ -25,9 +27,15 @@ def scan_repository(
     Blocks for the whole scan — see `docs/api.md` for the known v1
     duration trade-off. 404 if the repository doesn't exist, 409 if
     it's not yet ready to scan (still cloning) or was rejected during
-    intake. A second scan replaces the repository's prior findings.
+    intake. A second scan replaces the repository's prior findings. The
+    optional request body's `categories` field selects which
+    vulnerability categories to scan for — omit it (or the whole body)
+    to scan every category, same as before this field existed.
     """
-    repository = run_scan_for_repository(repository_id, session, llm_client, settings)
+    selected_categories = body.selected_categories() if body is not None else None
+    repository = run_scan_for_repository(
+        repository_id, session, llm_client, settings, selected_categories
+    )
     session.commit()
     return RepositoryResponse.model_validate(repository)
 
