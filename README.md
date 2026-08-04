@@ -178,6 +178,12 @@ Lint and type-check:
 ./.venv/bin/mypy src
 ```
 
+## Deploying
+
+Deploying the backend and frontend to Render and Vercel, respectively —
+including why they're on different platforms and how to wire them
+together — is covered in [`docs/deployment.md`](docs/deployment.md).
+
 ## Full documentation
 
 This README covers the basics. For the full docs site (API reference,

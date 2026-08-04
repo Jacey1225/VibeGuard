@@ -6,6 +6,7 @@ nav:
   - Overview: index.md
   - Getting Started: getting-started.md
   - API Reference: api.md
+  - Deployment: deployment.md
   - Development: development.md
 
 theme:

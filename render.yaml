@@ -1,0 +1,58 @@
+# Render Blueprint for the VibeGuard API. See docs/deployment.md for the
+# full walkthrough (env vars that need real values, GitHub OAuth App setup,
+# and how this pairs with the frontend deployed separately on Vercel).
+#
+# Deploy: Render dashboard -> New -> Blueprint -> point at this repo.
+# Render will prompt for every env var below marked `sync: false`.
+
+services:
+  - type: web
+    name: vibeguard-api
+    runtime: python
+    plan: starter
+    buildCommand: "pip install -e ."
+    # alembic upgrade head is safe to re-run on every boot (idempotent,
+    # tracks applied revisions) -- fine for a single instance. If this
+    # service is ever scaled to multiple instances, move it to a
+    # dedicated pre-deploy step instead of the boot command.
+    startCommand: "alembic upgrade head && uvicorn vibeguard.api.main:app --host 0.0.0.0 --port $PORT"
+    healthCheckPath: /docs
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: VIBEGUARD_DATABASE_URL
+        fromDatabase:
+          name: vibeguard-db
+          property: connectionString
+      # Required -- the scan engine's LLM confirmation calls fail without it.
+      - key: OPENROUTER_API_KEY
+        sync: false
+      # Required even if the remediation/login flow is never used --
+      # Settings has no default for these. See docs/deployment.md for how
+      # to provision a GitHub OAuth App.
+      - key: VIBEGUARD_GITHUB_OAUTH_CLIENT_ID
+        sync: false
+      - key: VIBEGUARD_GITHUB_OAUTH_CLIENT_SECRET
+        sync: false
+      # Set to https://<this-service>.onrender.com/auth/github/callback
+      # once the service's real URL is known (visible in the Render
+      # dashboard after first deploy).
+      - key: VIBEGUARD_GITHUB_OAUTH_REDIRECT_URI
+        sync: false
+      # Set to the Vercel frontend's URL, e.g. https://<project>.vercel.app
+      - key: VIBEGUARD_FRONTEND_REDIRECT_BASE_URL
+        sync: false
+      # Generate once: ./.venv/bin/python -c
+      # 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
+      - key: VIBEGUARD_TOKEN_ENCRYPTION_KEY
+        sync: false
+      # Comma-separated. Must include the Vercel frontend's URL or the
+      # browser will get CORS errors on every request.
+      - key: VIBEGUARD_CORS_ALLOWED_ORIGINS
+        sync: false
+
+databases:
+  - name: vibeguard-db
+    plan: free
+    databaseName: vibeguard
+    user: vibeguard

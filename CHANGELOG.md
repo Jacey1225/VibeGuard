@@ -4,6 +4,13 @@
 
 ### Added
 
+- Deployment config for Render (backend, `render.yaml` Blueprint) and
+  docs for Vercel (frontend) — see `docs/deployment.md`. `Settings.database_url`
+  now normalizes a bare `postgres://`/`postgresql://` URL (what every
+  managed Postgres provider hands out) to `postgresql+psycopg://`, since
+  SQLAlchemy's default driver for the bare scheme is psycopg2, which
+  this project doesn't depend on — previously this would only surface
+  as a crash on the first query, not at startup.
 - CORS support (`CORSMiddleware`), previously entirely absent, so a
   browser-based frontend can call the API cross-origin at all. The
   allowed origin list is configurable via `VIBEGUARD_CORS_ALLOWED_ORIGINS`

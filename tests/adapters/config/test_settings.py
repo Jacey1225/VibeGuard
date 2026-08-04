@@ -65,6 +65,30 @@ def test_settings_secret_fields_repr_is_masked():
     assert REQUIRED_SETTINGS_KWARGS["token_encryption_key"] not in rendered
 
 
+@pytest.mark.parametrize(
+    ("raw_url", "expected"),
+    [
+        (
+            "postgres://user:pw@host:5432/db",
+            "postgresql+psycopg://user:pw@host:5432/db",
+        ),
+        (
+            "postgresql://user:pw@host:5432/db",
+            "postgresql+psycopg://user:pw@host:5432/db",
+        ),
+        (
+            "postgresql+psycopg://user:pw@host:5432/db",
+            "postgresql+psycopg://user:pw@host:5432/db",
+        ),
+    ],
+)
+def test_settings_normalizes_bare_postgres_scheme_to_psycopg_driver(
+    raw_url: str, expected: str
+):
+    settings = Settings(**{**REQUIRED_SETTINGS_KWARGS, "database_url": raw_url})
+    assert settings.database_url == expected
+
+
 def test_load_cors_allowed_origins_defaults_to_local_frontend_dev_origin(
     monkeypatch: pytest.MonkeyPatch,
 ):

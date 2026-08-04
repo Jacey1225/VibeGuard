@@ -2,7 +2,7 @@
 
 import os
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from vibeguard.core.limits import (
@@ -23,6 +23,8 @@ from vibeguard.core.limits import (
     DEFAULT_REMEDIATION_LLM_MAX_TOKENS,
     DEFAULT_SESSION_TTL_HOURS,
 )
+
+_BARE_POSTGRES_SCHEMES = {"postgres", "postgresql"}
 
 
 class Settings(BaseSettings):
@@ -74,6 +76,23 @@ class Settings(BaseSettings):
 
     session_ttl_hours: int = DEFAULT_SESSION_TTL_HOURS
     oauth_state_cookie_ttl_seconds: int = DEFAULT_OAUTH_STATE_COOKIE_TTL_SECONDS
+
+    @field_validator("database_url", mode="after")
+    @classmethod
+    def _normalize_postgres_driver(cls, value: str) -> str:
+        """Rewrite a bare postgres(ql):// URL to explicitly use the psycopg3 driver.
+
+        Managed Postgres providers (Render, Railway, Heroku, RDS...) hand
+        out connection strings with a bare `postgres://` or `postgresql://`
+        scheme. SQLAlchemy's default driver for that scheme is psycopg2,
+        which this project doesn't depend on (only `psycopg[binary]`,
+        psycopg3) -- pasted in as-is, the app would crash on first query
+        with "No module named 'psycopg2'" instead of at startup.
+        """
+        scheme, sep, rest = value.partition("://")
+        if sep and scheme in _BARE_POSTGRES_SCHEMES:
+            return f"postgresql+psycopg://{rest}"
+        return value
 
 
 _DEFAULT_CORS_ALLOWED_ORIGINS = ["http://localhost:5173"]
