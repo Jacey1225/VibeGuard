@@ -5,12 +5,13 @@ from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI
+from starlette.middleware.cors import CORSMiddleware
 
 from vibeguard.adapters.auth.github_oauth_client import (
     GitHubOAuthResponseParseError,
     GitHubOAuthUnavailableError,
 )
-from vibeguard.adapters.config.settings import Settings
+from vibeguard.adapters.config.settings import Settings, load_cors_allowed_origins
 from vibeguard.adapters.db.session import build_engine, build_session_factory
 from vibeguard.adapters.github.client import GitHubApiUnavailableError
 from vibeguard.api.auth_dependencies import UnauthenticatedError
@@ -72,6 +73,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 def create_app() -> FastAPI:
     """Build the configured FastAPI application."""
     app = FastAPI(title="VibeGuard", lifespan=lifespan)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=load_cors_allowed_origins(),
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     app.include_router(repositories_router)
     app.include_router(scans_router)
     app.include_router(auth_router)

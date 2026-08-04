@@ -1,5 +1,7 @@
 """Application configuration loaded from environment variables."""
 
+import os
+
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -72,3 +74,26 @@ class Settings(BaseSettings):
 
     session_ttl_hours: int = DEFAULT_SESSION_TTL_HOURS
     oauth_state_cookie_ttl_seconds: int = DEFAULT_OAUTH_STATE_COOKIE_TTL_SECONDS
+
+
+_DEFAULT_CORS_ALLOWED_ORIGINS = ["http://localhost:5173"]
+
+
+def load_cors_allowed_origins() -> list[str]:
+    """Read allowed CORS origins from `VIBEGUARD_CORS_ALLOWED_ORIGINS`.
+
+    Comma-separated (e.g. "http://localhost:5173,https://app.example.com"),
+    defaulting to the frontend's own Vite dev server origin. Never treat a
+    wildcard as acceptable here -- see code-security's CORS guidance.
+
+    Reads the environment directly rather than going through `Settings`,
+    because `create_app()` must register CORS middleware before the app
+    starts serving, while `Settings()` -- which requires unrelated fields
+    like `database_url` -- is deliberately constructed later, in
+    `lifespan()`, so importing the app module doesn't require every env
+    var to be set.
+    """
+    raw = os.environ.get("VIBEGUARD_CORS_ALLOWED_ORIGINS")
+    if not raw:
+        return list(_DEFAULT_CORS_ALLOWED_ORIGINS)
+    return [origin.strip() for origin in raw.split(",") if origin.strip()]

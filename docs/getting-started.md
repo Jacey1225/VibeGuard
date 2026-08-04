@@ -46,7 +46,7 @@ intake/scanning use:
 export VIBEGUARD_GITHUB_OAUTH_CLIENT_ID="..."
 export VIBEGUARD_GITHUB_OAUTH_CLIENT_SECRET="..."
 export VIBEGUARD_GITHUB_OAUTH_REDIRECT_URI="http://localhost:8000/auth/github/callback"
-export VIBEGUARD_FRONTEND_REDIRECT_BASE_URL="http://localhost:3000"
+export VIBEGUARD_FRONTEND_REDIRECT_BASE_URL="http://localhost:5173"
 ```
 
 Also generate a `token_encryption_key` — this encrypts every stored
@@ -72,6 +72,29 @@ for what's out of scope in v1).
 ```bash
 ./.venv/bin/uvicorn vibeguard.api.main:app --reload
 ```
+
+By default the API only accepts browser requests from
+`http://localhost:5173` (Vite's default dev port, matching the frontend
+below). Override this with a comma-separated
+`VIBEGUARD_CORS_ALLOWED_ORIGINS` if the frontend runs elsewhere:
+
+```bash
+export VIBEGUARD_CORS_ALLOWED_ORIGINS="http://localhost:5173,https://app.example.com"
+```
+
+## Run the frontend
+
+The product-facing UI lives in `frontend/`, a separate Node/Vite app:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+It reads the backend's URL from `VITE_VIBECHECK_API_URL`
+(`frontend/.env.local`), defaulting to `http://localhost:8000`. See
+`frontend/README.md` for what is and isn't wired to the real API yet.
 
 ## Submit a repository
 

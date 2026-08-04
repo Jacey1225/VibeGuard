@@ -65,6 +65,31 @@ Apply the database schema:
 ./.venv/bin/uvicorn vibeguard.api.main:app --reload
 ```
 
+By default the API only accepts browser requests from
+`http://localhost:5173` (Vite's default dev port). Override this with a
+comma-separated `VIBEGUARD_CORS_ALLOWED_ORIGINS` if the frontend runs
+elsewhere:
+
+```bash
+export VIBEGUARD_CORS_ALLOWED_ORIGINS="http://localhost:5173,https://app.example.com"
+```
+
+## Running the frontend
+
+The product-facing UI (`Vibecheck`) lives in [`frontend/`](frontend/README.md) —
+a separate Node/Vite app, not part of the Python package:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+It reads the backend's URL from `VITE_VIBECHECK_API_URL` (see
+`frontend/.env.local`), defaulting to `http://localhost:8000`. See
+[`frontend/README.md`](frontend/README.md) for what is and isn't wired
+to the real API yet.
+
 ## Submitting a repository
 
 ```bash

@@ -4,6 +4,18 @@
 
 ### Added
 
+- CORS support (`CORSMiddleware`), previously entirely absent, so a
+  browser-based frontend can call the API cross-origin at all. The
+  allowed origin list is configurable via `VIBEGUARD_CORS_ALLOWED_ORIGINS`
+  (comma-separated), defaulting to `http://localhost:5173` (Vite's
+  default dev port) — never a wildcard, per the same misconfiguration
+  this project's own `security_misconfiguration` heuristic flags in
+  scanned code. Read directly from the environment
+  (`load_cors_allowed_origins()` in `adapters/config/settings.py`)
+  rather than through `Settings`, so registering it in `create_app()` —
+  which must happen before the app starts serving — doesn't require
+  every other `Settings` field (`database_url`, etc.) to be set first.
+
 - `POST /repositories/{id}/scan` and `POST /snippets/{id}/scan` now
   accept an optional request body, `{"categories": [...]}`, selecting
   which of the 10 `VulnCategory` values to scan for. Filtering happens

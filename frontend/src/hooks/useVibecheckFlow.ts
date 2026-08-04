@@ -56,6 +56,7 @@ const CHANGELOG_DELAY_MS = 1000;
 const MORPH_MS = 260;
 const PROGRAMMATIC_SCROLL_SETTLE_MS = 550;
 const CONNECTED_REPO_LABEL = "acme-corp/internal-ops";
+const API_BASE_URL = import.meta.env.VITE_VIBECHECK_API_URL || "http://localhost:8000";
 
 function initialState(): VibecheckState {
   const scopeSelected: Record<string, boolean> = {};
@@ -226,14 +227,12 @@ export function useVibecheckFlow(options: VibecheckOptions = {}) {
       const repoId = stateRef.current.repoId;
       if (!repoId) return;
 
-      const apiUrl = import.meta.env.VITE_VIBECHECK_API_URL || "http://localhost:8000";
-
       try {
         patch({ scanResultsLoading: true });
         // POST /repositories/{id}/scan blocks until the real scan (heuristics
         // + LLM confirmation) finishes, then returns the repository record --
         // it does NOT return findings text. Findings are a separate call.
-        const scanResponse = await fetch(`${apiUrl}/repositories/${repoId}/scan`, { method: "POST" });
+        const scanResponse = await fetch(`${API_BASE_URL}/repositories/${repoId}/scan`, { method: "POST" });
 
         if (!scanResponse.ok) {
           const errorBody = await scanResponse.text();
@@ -249,7 +248,7 @@ export function useVibecheckFlow(options: VibecheckOptions = {}) {
         // sitting in the DB, so findings are always fetched regardless of
         // status; scan_failed is surfaced as a note in the report instead
         // of a hard stop.
-        const findingsResponse = await fetch(`${apiUrl}/repositories/${repoId}/findings`);
+        const findingsResponse = await fetch(`${API_BASE_URL}/repositories/${repoId}/findings`);
         if (!findingsResponse.ok) {
           const errorBody = await findingsResponse.text();
           patch({ scanResults: `Findings request failed (${findingsResponse.status}): ${errorBody}` });
@@ -408,7 +407,7 @@ export function useVibecheckFlow(options: VibecheckOptions = {}) {
     patch({ repoUrlLoading: true, repoUrlError: null });
 
     try {
-      const response = await fetch("http://localhost:8000/repositories", {
+      const response = await fetch(`${API_BASE_URL}/repositories`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ repo_url: repoUrl }),
@@ -554,7 +553,7 @@ export function useVibecheckFlow(options: VibecheckOptions = {}) {
     patch({ repoUrlLoading: true, repoUrlError: null });
 
     try {
-      const response = await fetch("http://localhost:8000/repositories", {
+      const response = await fetch(`${API_BASE_URL}/repositories`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ repo_url: url }),

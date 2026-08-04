@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from tests.conftest import REQUIRED_SETTINGS_KWARGS
-from vibeguard.adapters.config.settings import Settings
+from vibeguard.adapters.config.settings import Settings, load_cors_allowed_origins
 
 _REQUIRED_ENV = {
     "VIBEGUARD_DATABASE_URL": REQUIRED_SETTINGS_KWARGS["database_url"],
@@ -63,3 +63,19 @@ def test_settings_secret_fields_repr_is_masked():
     assert "test-openrouter-key" not in rendered
     assert "test-oauth-client-secret" not in rendered
     assert REQUIRED_SETTINGS_KWARGS["token_encryption_key"] not in rendered
+
+
+def test_load_cors_allowed_origins_defaults_to_local_frontend_dev_origin(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.delenv("VIBEGUARD_CORS_ALLOWED_ORIGINS", raising=False)
+    assert load_cors_allowed_origins() == ["http://localhost:5173"]
+
+
+def test_load_cors_allowed_origins_parses_comma_separated_env_var(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv(
+        "VIBEGUARD_CORS_ALLOWED_ORIGINS", "http://localhost:5173, https://app.example.com"
+    )
+    assert load_cors_allowed_origins() == ["http://localhost:5173", "https://app.example.com"]

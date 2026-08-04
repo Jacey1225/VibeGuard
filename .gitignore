@@ -10,3 +10,7 @@ htmlcov/
 .env
 *.pem
 site/
+.claude
+.hypothesis
+CLAUDE.md
+frontend/.claude
