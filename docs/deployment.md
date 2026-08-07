@@ -59,6 +59,19 @@ Render will prompt you for these during setup; have them ready:
    URL on the GitHub OAuth App itself (**Settings → Developer settings
    → OAuth Apps**), since GitHub rejects a mismatch.
 
+### Troubleshooting: OAuth sends users back to `localhost` after deploy
+
+Symptom: a user completes GitHub's consent screen and lands on an
+unreachable `http://localhost:8000/auth/github/callback?code=...&state=...`
+instead of the deployed API. Cause: `VIBEGUARD_GITHUB_OAUTH_REDIRECT_URI`
+on the Render service is still the placeholder from step 3 above — step 5
+(setting it to the real `<service>.onrender.com/auth/github/callback`
+URL, and updating the same callback URL on the GitHub OAuth App) was
+skipped or reset. Fix: go back and do step 5. The authorization `code`
+and `state` from the broken attempt are single-use and already expired,
+so the user just needs to retry login after the value is corrected — no
+data was lost.
+
 ### Plan/tier notes
 
 - `render.yaml` defaults the web service to `starter` and the database
