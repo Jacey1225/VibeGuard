@@ -92,9 +92,12 @@ npm install
 npm run dev
 ```
 
-It reads the backend's URL from `VITE_VIBECHECK_API_URL`
-(`frontend/.env.local`), defaulting to `http://localhost:8000`. See
-`frontend/README.md` for what is and isn't wired to the real API yet.
+It reads the backend's URL from `VITE_VIBECHECK_API_URL` — no
+code-level fallback, so it must be set. `frontend/.env.local` already
+sets it to `http://localhost:8000` for local dev; if it's ever unset,
+the app throws a clear configuration error instead of silently
+guessing an origin. See `frontend/README.md` for what is and isn't
+wired to the real API yet.
 
 ## Submit a repository
 

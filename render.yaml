@@ -1,6 +1,7 @@
 # Render Blueprint for the VibeGuard API. See docs/deployment.md for the
 # full walkthrough (env vars that need real values, GitHub OAuth App setup,
-# and how this pairs with the frontend deployed separately on Vercel).
+# and how this pairs with the frontend, deployed as its own Render Static
+# Site or on Vercel).
 #
 # Deploy: Render dashboard -> New -> Blueprint -> point at this repo.
 # Render will prompt for every env var below marked `sync: false`.
@@ -39,14 +40,15 @@ services:
       # dashboard after first deploy).
       - key: VIBEGUARD_GITHUB_OAUTH_REDIRECT_URI
         sync: false
-      # Set to the Vercel frontend's URL, e.g. https://<project>.vercel.app
+      # Set to the deployed frontend's URL, e.g.
+      # https://<your-static-site>.onrender.com or https://<project>.vercel.app
       - key: VIBEGUARD_FRONTEND_REDIRECT_BASE_URL
         sync: false
       # Generate once: ./.venv/bin/python -c
       # 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
       - key: VIBEGUARD_TOKEN_ENCRYPTION_KEY
         sync: false
-      # Comma-separated. Must include the Vercel frontend's URL or the
+      # Comma-separated. Must include the deployed frontend's URL or the
       # browser will get CORS errors on every request.
       - key: VIBEGUARD_CORS_ALLOWED_ORIGINS
         sync: false

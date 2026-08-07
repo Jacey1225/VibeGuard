@@ -85,6 +85,144 @@ describe("useVibecheckFlow", () => {
     expect(result.current.state.pipelineTick).toBe(7);
   });
 
+  it("submitRepoUrl reads the backend origin from VITE_VIBECHECK_API_URL", async () => {
+    vi.stubEnv("VITE_VIBECHECK_API_URL", "https://configured-backend.example");
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: "rejected", rejection_reason: "not_public_or_not_found" }),
+    } as Response);
+
+    const { result } = renderHook(() => useVibecheckFlow());
+    act(() => result.current.actions.onRepoUrlInput(({ target: { value: "https://github.com/acme/widgets" } }) as ChangeEvent<HTMLInputElement>));
+    await act(async () => {
+      await result.current.actions.submitRepoUrl();
+    });
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://configured-backend.example/repositories",
+      expect.objectContaining({ method: "POST" }),
+    );
+
+    fetchSpy.mockRestore();
+    vi.unstubAllEnvs();
+  });
+
+  it("submitRepoUrl surfaces an error and never calls fetch when VITE_VIBECHECK_API_URL is unset", async () => {
+    vi.stubEnv("VITE_VIBECHECK_API_URL", "");
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    const { result } = renderHook(() => useVibecheckFlow());
+    act(() => result.current.actions.onRepoUrlInput(({ target: { value: "https://github.com/acme/widgets" } }) as ChangeEvent<HTMLInputElement>));
+    await act(async () => {
+      await result.current.actions.submitRepoUrl();
+    });
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(result.current.state.repoUrlLoading).toBe(false);
+    expect(result.current.state.repoUrlError).toBeTruthy();
+
+    fetchSpy.mockRestore();
+    vi.unstubAllEnvs();
+  });
+
+  it("connectSuggestedRepo reads the backend origin from VITE_VIBECHECK_API_URL", async () => {
+    vi.stubEnv("VITE_VIBECHECK_API_URL", "https://configured-backend.example");
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: "rejected", rejection_reason: "not_public_or_not_found" }),
+    } as Response);
+
+    const { result } = renderHook(() => useVibecheckFlow());
+    await act(async () => {
+      const pending = result.current.actions.connectSuggestedRepo("https://github.com/acme/widgets");
+      await vi.advanceTimersByTimeAsync(60);
+      await pending;
+    });
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://configured-backend.example/repositories",
+      expect.objectContaining({ method: "POST" }),
+    );
+
+    fetchSpy.mockRestore();
+    vi.unstubAllEnvs();
+  });
+
+  it("connectSuggestedRepo surfaces an error and never calls fetch when VITE_VIBECHECK_API_URL is unset", async () => {
+    vi.stubEnv("VITE_VIBECHECK_API_URL", "");
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    const { result } = renderHook(() => useVibecheckFlow());
+    await act(async () => {
+      const pending = result.current.actions.connectSuggestedRepo("https://github.com/acme/widgets");
+      await vi.advanceTimersByTimeAsync(60);
+      await pending;
+    });
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(result.current.state.repoUrlLoading).toBe(false);
+    expect(result.current.state.repoUrlError).toBeTruthy();
+
+    fetchSpy.mockRestore();
+    vi.unstubAllEnvs();
+  });
+
+  it("runPipeline's scan and findings requests route through VITE_VIBECHECK_API_URL, while the GitHub file listing stays on api.github.com", async () => {
+    vi.stubEnv("VITE_VIBECHECK_API_URL", "https://configured-backend.example");
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "https://configured-backend.example/repositories") {
+        return { ok: true, json: async () => ({ status: "scan_pending_implementation", id: 42 }) } as Response;
+      }
+      if (url.startsWith("https://api.github.com/")) {
+        return { ok: false, json: async () => [] } as Response;
+      }
+      if (url === "https://configured-backend.example/repositories/42/scan") {
+        return {
+          ok: true,
+          json: async () => ({
+            owner: "acme",
+            name: "widgets",
+            updated_at: "2026-01-01",
+            total_files_stored: 3,
+            status: "completed",
+          }),
+        } as Response;
+      }
+      if (url === "https://configured-backend.example/repositories/42/findings") {
+        return { ok: true, json: async () => ({ findings: [] }) } as Response;
+      }
+      throw new Error(`unexpected fetch url in test: ${url}`);
+    }) as typeof fetch);
+
+    const { result } = renderHook(() => useVibecheckFlow());
+    act(() =>
+      result.current.actions.onRepoUrlInput(
+        ({ target: { value: "https://github.com/acme/widgets" } }) as ChangeEvent<HTMLInputElement>,
+      ),
+    );
+    await act(async () => {
+      await result.current.actions.submitRepoUrl();
+    });
+    expect(result.current.state.repoId).toBe("42");
+
+    act(() => result.current.actions.submitComposer());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300); // morph onto the scanning screen, kicks off runPipeline
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(7100); // pipeline ticks to completion, then fetchScanResults runs
+    });
+
+    const calledUrls = fetchSpy.mock.calls.map((call) => String(call[0]));
+    expect(calledUrls).toContain("https://configured-backend.example/repositories/42/scan");
+    expect(calledUrls).toContain("https://configured-backend.example/repositories/42/findings");
+    expect(calledUrls.some((u) => u.startsWith("https://api.github.com/repos/acme/widgets/contents"))).toBe(true);
+
+    fetchSpy.mockRestore();
+    vi.unstubAllEnvs();
+  });
+
   it("resetFlow returns to the composer with every finding back to pending", () => {
     const { result } = renderHook(() => useVibecheckFlow());
     act(() => result.current.actions.setFindingStatus(1, "skipped", 0));

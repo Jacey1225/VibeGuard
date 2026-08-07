@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Fixed
+
+- Frontend (`useVibecheckFlow.ts`): removed a hardcoded
+  `http://localhost:8000` fallback that let backend requests
+  (`/repositories`, `/repositories/{id}/scan`, `/repositories/{id}/findings`)
+  silently bypass `VITE_VIBECHECK_API_URL` when it was unset — e.g. a
+  misconfigured production deploy would have quietly sent requests to
+  `localhost` instead of failing. Every backend call now resolves the
+  origin through a single `getApiBaseUrl()` helper that throws a clear
+  configuration error instead. GitHub API calls (`api.github.com`) are
+  unaffected — they were never routed through this variable.
+
 ### Added
 
 - Deployment config for Render (backend, `render.yaml` Blueprint) and

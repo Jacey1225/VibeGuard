@@ -56,7 +56,26 @@ const CHANGELOG_DELAY_MS = 1000;
 const MORPH_MS = 260;
 const PROGRAMMATIC_SCROLL_SETTLE_MS = 550;
 const CONNECTED_REPO_LABEL = "acme-corp/internal-ops";
-const API_BASE_URL = import.meta.env.VITE_VIBECHECK_API_URL || "http://localhost:8000";
+
+/**
+ * Resolves the VibeGuard backend's base URL. Every request to the backend
+ * (as opposed to the GitHub API) must go through this -- no hardcoded
+ * origin, no silent fallback. If the env var isn't set, this throws rather
+ * than substituting a guessed origin, so callers surface a clear
+ * misconfiguration error instead of silently hitting the wrong backend.
+ * See frontend/.env.local for local dev and docs/deployment.md for
+ * production setup.
+ */
+function getApiBaseUrl(): string {
+  const url = import.meta.env.VITE_VIBECHECK_API_URL;
+  if (!url) {
+    throw new Error(
+      "VITE_VIBECHECK_API_URL is not set. Configure it in frontend/.env.local (local dev) " +
+        "or the deploy target's environment variables (production) -- see docs/deployment.md.",
+    );
+  }
+  return url;
+}
 
 function initialState(): VibecheckState {
   const scopeSelected: Record<string, boolean> = {};
@@ -232,7 +251,7 @@ export function useVibecheckFlow(options: VibecheckOptions = {}) {
         // POST /repositories/{id}/scan blocks until the real scan (heuristics
         // + LLM confirmation) finishes, then returns the repository record --
         // it does NOT return findings text. Findings are a separate call.
-        const scanResponse = await fetch(`${API_BASE_URL}/repositories/${repoId}/scan`, { method: "POST" });
+        const scanResponse = await fetch(`${getApiBaseUrl()}/repositories/${repoId}/scan`, { method: "POST" });
 
         if (!scanResponse.ok) {
           const errorBody = await scanResponse.text();
@@ -248,7 +267,7 @@ export function useVibecheckFlow(options: VibecheckOptions = {}) {
         // sitting in the DB, so findings are always fetched regardless of
         // status; scan_failed is surfaced as a note in the report instead
         // of a hard stop.
-        const findingsResponse = await fetch(`${API_BASE_URL}/repositories/${repoId}/findings`);
+        const findingsResponse = await fetch(`${getApiBaseUrl()}/repositories/${repoId}/findings`);
         if (!findingsResponse.ok) {
           const errorBody = await findingsResponse.text();
           patch({ scanResults: `Findings request failed (${findingsResponse.status}): ${errorBody}` });
@@ -407,7 +426,7 @@ export function useVibecheckFlow(options: VibecheckOptions = {}) {
     patch({ repoUrlLoading: true, repoUrlError: null });
 
     try {
-      const response = await fetch(`${API_BASE_URL}/repositories`, {
+      const response = await fetch(`${getApiBaseUrl()}/repositories`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ repo_url: repoUrl }),
@@ -553,7 +572,7 @@ export function useVibecheckFlow(options: VibecheckOptions = {}) {
     patch({ repoUrlLoading: true, repoUrlError: null });
 
     try {
-      const response = await fetch(`${API_BASE_URL}/repositories`, {
+      const response = await fetch(`${getApiBaseUrl()}/repositories`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ repo_url: url }),
