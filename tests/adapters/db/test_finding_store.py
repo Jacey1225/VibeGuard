@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from vibeguard.adapters.db.finding_store import (
     delete_findings_for_repository,
+    get_repository_file_by_path,
     insert_findings,
     list_findings_for_repository,
     list_stored_files_for_repository,
@@ -61,6 +62,52 @@ def test_list_stored_files_for_repository_excludes_skipped_files(db_session: Ses
 
     assert len(files) == 1
     assert files[0].relative_path == "a.py"
+
+
+def test_get_repository_file_by_path_returns_the_matching_file(db_session: Session):
+    repository = _make_repository(db_session)
+    db_session.add_all(
+        [
+            RepositoryFileModel(
+                repository_id=repository.id, relative_path="src/app.py", size_bytes=1, content="x"
+            ),
+            RepositoryFileModel(
+                repository_id=repository.id, relative_path="src/other.py", size_bytes=1, content="y"
+            ),
+        ]
+    )
+    db_session.flush()
+
+    file = get_repository_file_by_path(db_session, repository.id, "src/app.py")
+
+    assert file is not None
+    assert file.content == "x"
+
+
+def test_get_repository_file_by_path_returns_none_when_no_file_matches(db_session: Session):
+    repository = _make_repository(db_session)
+    db_session.flush()
+
+    file = get_repository_file_by_path(db_session, repository.id, "does/not/exist.py")
+
+    assert file is None
+
+
+def test_get_repository_file_by_path_does_not_match_a_different_repository(db_session: Session):
+    repository_a = _make_repository(db_session)
+    repository_b = RepositoryModel(source_url="u2", owner="o2", name="r2")
+    db_session.add(repository_b)
+    db_session.flush()
+    db_session.add(
+        RepositoryFileModel(
+            repository_id=repository_a.id, relative_path="app.py", size_bytes=1, content="x"
+        )
+    )
+    db_session.flush()
+
+    file = get_repository_file_by_path(db_session, repository_b.id, "app.py")
+
+    assert file is None
 
 
 def test_insert_findings_persists_all_fields(db_session: Session):

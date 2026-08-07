@@ -197,6 +197,48 @@ broken by file path, then line number).
 | No repository with this id | `404` |
 | Findings returned (empty list if none) | `200` |
 
+## `GET /repositories/{id}/files/preview`
+
+Return a windowed, line-numbered preview of one stored file, centered
+on a given line — the code shown on a finding card. Served entirely
+from `repository_files` (populated during intake), never a live call to
+GitHub, so the preview can never drift from what was actually scanned
+and needs no GitHub credential from the caller.
+
+### Query parameters
+
+| Parameter | Required | Meaning |
+|---|---|---|
+| `path` | Yes | The finding's `relative_path` within the repository. |
+| `line` | Yes | The finding's reported `line_number` (1-indexed). |
+
+### Response body
+
+```json
+{
+  "relative_path": "app/db.py",
+  "lines": [
+    { "number": 40, "text": "def run_query(user_id):" },
+    { "number": 41, "text": "    conn = get_connection()" },
+    { "number": 42, "text": "    query = f\"SELECT * FROM users WHERE id = {user_id}\"" }
+  ],
+  "highlight_line": 42
+}
+```
+
+Up to 5 lines of context are included on each side of `highlight_line`,
+clamped at the start/end of the file.
+
+### HTTP status codes
+
+| Condition | HTTP status |
+|---|---|
+| No repository with this id | `404` |
+| No file was stored at `path` for this repository | `404` |
+| The file was skipped during intake (binary or over a size limit) | `422` |
+| `line` is outside the file's current stored length | `422` |
+| Preview returned | `200` |
+
 ## `POST /snippets`
 
 Submit plain-text code for scanning -- the counterpart to `POST

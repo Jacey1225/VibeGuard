@@ -19,6 +19,23 @@ def list_stored_files_for_repository(
     return list(session.execute(statement).scalars().all())
 
 
+def get_repository_file_by_path(
+    session: Session, repository_id: int, relative_path: str
+) -> RepositoryFileModel | None:
+    """Fetch one repository's file (stored or skipped) by its exact relative path.
+
+    `relative_path` is matched exactly against the unique
+    `(repository_id, relative_path)` constraint -- at most one row can
+    ever match. Returns `None` if no file was recorded at that path
+    during intake (never fetched fresh from GitHub).
+    """
+    statement = select(RepositoryFileModel).where(
+        RepositoryFileModel.repository_id == repository_id,
+        RepositoryFileModel.relative_path == relative_path,
+    )
+    return session.execute(statement).scalar_one_or_none()
+
+
 def delete_findings_for_repository(session: Session, repository_id: int) -> None:
     """Delete every prior finding for a repository (rescans replace, not accumulate)."""
     session.execute(delete(FindingModel).where(FindingModel.repository_id == repository_id))

@@ -16,10 +16,13 @@ from vibeguard.adapters.db.session import build_engine, build_session_factory
 from vibeguard.adapters.github.client import GitHubApiUnavailableError
 from vibeguard.api.auth_dependencies import UnauthenticatedError
 from vibeguard.api.error_handlers import (
+    handle_file_not_found_in_repository,
+    handle_file_not_previewable,
     handle_github_api_unavailable,
     handle_github_oauth_login_failed,
     handle_github_oauth_unavailable,
     handle_invalid_repository_url,
+    handle_line_out_of_range,
     handle_remediation_already_decided,
     handle_remediation_not_found,
     handle_remediation_push_conflict,
@@ -33,12 +36,15 @@ from vibeguard.api.error_handlers import (
     handle_unauthenticated,
 )
 from vibeguard.api.routes.auth import router as auth_router
+from vibeguard.api.routes.file_previews import router as file_previews_router
 from vibeguard.api.routes.remediations import router as remediations_router
 from vibeguard.api.routes.repositories import router as repositories_router
 from vibeguard.api.routes.scans import router as scans_router
 from vibeguard.api.routes.snippet_scans import router as snippet_scans_router
 from vibeguard.api.routes.snippets import router as snippets_router
+from vibeguard.core.file_preview import LineOutOfRangeError
 from vibeguard.core.github_url import InvalidRepositoryUrlError
+from vibeguard.engine.file_preview import FileNotFoundInRepositoryError, FileNotPreviewableError
 from vibeguard.engine.remediation_decision import (
     RemediationAlreadyDecidedError,
     RemediationNotFoundError,
@@ -85,6 +91,7 @@ def create_app() -> FastAPI:
     app.include_router(remediations_router)
     app.include_router(snippets_router)
     app.include_router(snippet_scans_router)
+    app.include_router(file_previews_router)
     app.add_exception_handler(InvalidRepositoryUrlError, handle_invalid_repository_url)
     app.add_exception_handler(GitHubApiUnavailableError, handle_github_api_unavailable)
     app.add_exception_handler(RepositoryNotFoundError, handle_repository_not_found)
@@ -104,6 +111,9 @@ def create_app() -> FastAPI:
         RemediationPushPermissionDeniedError, handle_remediation_push_permission_denied
     )
     app.add_exception_handler(RemediationPushUnavailableError, handle_remediation_push_unavailable)
+    app.add_exception_handler(FileNotFoundInRepositoryError, handle_file_not_found_in_repository)
+    app.add_exception_handler(FileNotPreviewableError, handle_file_not_previewable)
+    app.add_exception_handler(LineOutOfRangeError, handle_line_out_of_range)
     return app
 
 

@@ -63,7 +63,7 @@ export function App({ bottomNavStyle = "pills", ambientGlow = true, scanSpeed = 
           {state.screen === 0 && <ComposerScreen state={state} actions={actions} />}
           {state.screen === 1 && <ScanningScreen state={state} actions={actions} />}
           {state.screen === 2 && <FindingsScreen state={state} actions={actions} />}
-          {state.screen === 3 && <FixingScreen state={state} />}
+          {state.screen === 3 && <FixingScreen state={state} actions={actions} />}
           {state.screen === 4 && <DiffScreen state={state} actions={actions} />}
         </div>
       </div>

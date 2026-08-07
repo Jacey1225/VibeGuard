@@ -4,6 +4,7 @@ import { useVibecheckFlow } from "../../hooks/useVibecheckFlow";
 import { splitSnippet, sliceAround } from "../../utils/snippet";
 import { DiffCard, type DiffBlockData } from "../diff/DiffCard";
 import { FindingDots } from "../findings/FindingDots";
+import { RealRemediationReviewScreen } from "./RealRemediationReviewScreen";
 
 type Actions = ReturnType<typeof useVibecheckFlow>["actions"];
 
@@ -12,7 +13,7 @@ interface DiffScreenProps {
   actions: Actions;
 }
 
-/** Screen 4: before/after diff review for every fix that was applied, then "send". */
+/** Screen 4: before/after diff review for every fix that was applied, then "send". Real-findings path renders RealRemediationReviewScreen instead. */
 export function DiffScreen({ state, actions }: DiffScreenProps) {
   const stageH = state.stageH;
   const compact = stageH < 430;
@@ -40,6 +41,10 @@ export function DiffScreen({ state, actions }: DiffScreenProps) {
       }),
     [queuedFindings, codeRows, queuedCount],
   );
+
+  if (state.realFindings.length > 0) {
+    return <RealRemediationReviewScreen state={state} actions={actions} />;
+  }
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", gap: 12, padding: "clamp(10px, 1.8vh, 20px) 0 clamp(6px, 1vh, 12px)" }}>

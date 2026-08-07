@@ -31,6 +31,36 @@ export interface RealFinding {
   created_at: string;
 }
 
+export type RemediationStatus = "proposed" | "rejected" | "pushed" | "push_failed";
+
+/** One proposed fix for a findings-bearing file, through review and (if approved) push. Mirrors `RemediationResponse` in `src/vibeguard/api/remediation_schemas.py`. */
+export interface RealRemediation {
+  id: number;
+  repository_id: number;
+  relative_path: string;
+  status: RemediationStatus;
+  original_content: string;
+  proposed_content: string;
+  diff_text: string;
+  summary: string;
+  model: string;
+  introduces_new_heuristic_hits: boolean;
+  new_heuristic_hit_summary: string | null;
+  push_target_branch: string | null;
+  pushed_commit_sha: string | null;
+  push_failure_reason: string | null;
+  decided_at: string | null;
+  decided_by_user_id: number | null;
+  decision_reason: string | null;
+  created_at: string;
+}
+
+export interface RemediationGenerationSummary {
+  attempted: number;
+  succeeded: number;
+  filesOverCap: number;
+}
+
 export interface VibecheckState {
   screen: number;
   morphing: boolean;
@@ -62,6 +92,18 @@ export interface VibecheckState {
   scanResults: string;
   scanResultsLoading: boolean;
   realFindings: RealFinding[];
+  /** Which real findings the user wants addressed -- shared state (lifted out of `RealFindingsPanel`) so it composes with `startRemediation`. */
+  selectedFindingIds: Set<number>;
+  /** Bearer token from the GitHub OAuth callback (`#session_token=...`), required on every remediation call. Also mirrored to `sessionStorage` so it survives the OAuth round-trip's full-page reload. */
+  sessionToken: string | null;
+  /** True for the brief window after an OAuth-redirect restore lands on screen 2 but before its findings have been re-fetched -- lets FindingsScreen show a spinner instead of a flash of the fixture demo panel (realFindings is still empty at that instant). */
+  sessionRestoring: boolean;
+  realRemediations: RealRemediation[];
+  remediationSummary: RemediationGenerationSummary | null;
+  remediationLoading: boolean;
+  remediationError: string | null;
+  /** Remediation ids with an approve/reject request in flight, for per-card loading state. */
+  decidingRemediationIds: Set<number>;
 }
 
 const PLACEHOLDER_ROTATE_MS = 3200;
@@ -74,6 +116,60 @@ const MORPH_MS = 260;
 const PROGRAMMATIC_SCROLL_SETTLE_MS = 550;
 const CONNECTED_REPO_LABEL = "acme-corp/internal-ops";
 
+/** sessionStorage key for the OAuth bearer token -- tab-scoped (cleared on tab close), never localStorage, to bound an XSS exfiltration window. */
+const SESSION_TOKEN_STORAGE_KEY = "vibeguard_session_token";
+/** sessionStorage key for the repo context saved just before a full-page redirect to `/auth/github/login`, so the flow can resume after the callback reloads the page. */
+const PENDING_REPO_STORAGE_KEY = "vibeguard_pending_repo";
+
+interface PendingRepoContext {
+  repoId: string;
+  sourceLabel: string;
+}
+
+function readStoredSessionToken(): string | null {
+  try {
+    return sessionStorage.getItem(SESSION_TOKEN_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredSessionToken(token: string): void {
+  try {
+    sessionStorage.setItem(SESSION_TOKEN_STORAGE_KEY, token);
+  } catch {
+    // sessionStorage unavailable (e.g. privacy mode) -- token still works for the current page load, just won't survive a reload.
+  }
+}
+
+function clearStoredSessionToken(): void {
+  try {
+    sessionStorage.removeItem(SESSION_TOKEN_STORAGE_KEY);
+  } catch {
+    // best effort
+  }
+}
+
+function writePendingRepoContext(context: PendingRepoContext): void {
+  try {
+    sessionStorage.setItem(PENDING_REPO_STORAGE_KEY, JSON.stringify(context));
+  } catch {
+    // sessionStorage unavailable -- the post-login redirect will land back on the composer instead of resuming this repo.
+  }
+}
+
+/** Reads and consumes (removes) the pending repo context, if any. */
+function takePendingRepoContext(): PendingRepoContext | null {
+  try {
+    const raw = sessionStorage.getItem(PENDING_REPO_STORAGE_KEY);
+    if (!raw) return null;
+    sessionStorage.removeItem(PENDING_REPO_STORAGE_KEY);
+    return JSON.parse(raw) as PendingRepoContext;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Resolves the VibeGuard backend's base URL. Every request to the backend
  * (as opposed to the GitHub API) must go through this -- no hardcoded
@@ -83,7 +179,7 @@ const CONNECTED_REPO_LABEL = "acme-corp/internal-ops";
  * See frontend/.env.local for local dev and docs/deployment.md for
  * production setup.
  */
-function getApiBaseUrl(): string {
+export function getApiBaseUrl(): string {
   const url = import.meta.env.VITE_VIBECHECK_API_URL;
   if (!url) {
     throw new Error(
@@ -128,6 +224,14 @@ function initialState(): VibecheckState {
     scanResults: "",
     scanResultsLoading: false,
     realFindings: [],
+    selectedFindingIds: new Set(),
+    sessionToken: null,
+    sessionRestoring: false,
+    realRemediations: [],
+    remediationSummary: null,
+    remediationLoading: false,
+    remediationError: null,
+    decidingRemediationIds: new Set(),
   };
 }
 
@@ -247,7 +351,10 @@ export function useVibecheckFlow(options: VibecheckOptions = {}) {
       r.morphTimer = setTimeout(() => {
         patch({ ...(extra || {}), screen, morphing: false });
         if (screen === 1) latest.current.runPipeline();
-        if (screen === 3) latest.current.runImplement();
+        // The fixture "implement" timer simulation only applies to the
+        // demo path -- the real-findings path drives screen 3 itself
+        // (startRemediation), so runImplement must not fire for it.
+        if (screen === 3 && stateRef.current.realFindings.length === 0) latest.current.runImplement();
       }, MORPH_MS);
     },
     [patch],
@@ -293,7 +400,9 @@ export function useVibecheckFlow(options: VibecheckOptions = {}) {
         }
 
         const { findings } = await findingsResponse.json();
-        patch({ realFindings: findings });
+        // Selection defaults to "all findings selected to fix" -- lifted
+        // shared state so it composes with startRemediation below.
+        patch({ realFindings: findings, selectedFindingIds: new Set(findings.map((f: RealFinding) => f.id)) });
 
         const counts = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
         for (const f of findings) {
@@ -409,6 +518,55 @@ export function useVibecheckFlow(options: VibecheckOptions = {}) {
       window.removeEventListener("resize", measure);
     };
   }, [clearTimers, measure, patch]);
+
+  /** Re-fetches a repository's real findings (used after the OAuth redirect restores a pending repo context, which has no findings in memory). Best-effort: a failure just leaves the Decide screen empty rather than blocking the token restore. */
+  const restoreFindingsAfterLogin = useCallback(
+    async (repoId: string) => {
+      try {
+        const response = await fetch(`${getApiBaseUrl()}/repositories/${repoId}/findings`);
+        if (!response.ok) return;
+        const { findings } = await response.json();
+        patch({ realFindings: findings, selectedFindingIds: new Set(findings.map((f: RealFinding) => f.id)) });
+      } catch {
+        // best-effort restore -- if it fails, the user lands on an empty Decide screen and can re-scan
+      } finally {
+        patch({ sessionRestoring: false });
+      }
+    },
+    [patch],
+  );
+
+  // Runs once on mount to complete the GitHub OAuth round-trip: the
+  // callback redirects back here with `#session_token=...` in the URL
+  // fragment (never sent to any server, per docs/api.md). If a repo
+  // context was saved just before the redirect (see signInWithGithub),
+  // restore it and re-fetch its findings so the Decide screen resumes
+  // where the user left off instead of landing back on the composer.
+  useEffect(() => {
+    const match = /session_token=([^&]+)/.exec(window.location.hash);
+    if (match) {
+      const token = decodeURIComponent(match[1]);
+      writeStoredSessionToken(token);
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+      const pending = takePendingRepoContext();
+      if (pending) {
+        patch({
+          sessionToken: token,
+          repoId: pending.repoId,
+          sourceLabel: pending.sourceLabel,
+          attached: true,
+          screen: 2,
+          sessionRestoring: true,
+        });
+        void restoreFindingsAfterLogin(pending.repoId);
+      } else {
+        patch({ sessionToken: token });
+      }
+      return;
+    }
+    const stored = readStoredSessionToken();
+    if (stored) patch({ sessionToken: stored });
+  }, [patch, restoreFindingsAfterLogin]);
 
   const onCodeInput = useCallback((e: ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
@@ -769,6 +927,148 @@ export function useVibecheckFlow(options: VibecheckOptions = {}) {
 
   const openPR = useCallback(() => morphTo(5), [morphTo]);
 
+  /** Toggles one real finding's membership in the shared selection set (lifted out of `RealFindingsPanel`). */
+  const toggleFindingSelection = useCallback(
+    (id: number) => {
+      patch((prev) => {
+        const next = new Set(prev.selectedFindingIds);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return { selectedFindingIds: next };
+      });
+    },
+    [patch],
+  );
+
+  /**
+   * Sends the browser to GitHub's OAuth consent screen
+   * (`GET /auth/github/login`), which is a full-page redirect -- there is
+   * no popup/iframe flow. If a repository is currently attached, its id
+   * and label are saved to sessionStorage first so the mount-time effect
+   * above can resume this same repo once `/auth/github/callback` redirects
+   * back with a token.
+   */
+  const signInWithGithub = useCallback(() => {
+    try {
+      const s = stateRef.current;
+      if (s.repoId) writePendingRepoContext({ repoId: s.repoId, sourceLabel: s.sourceLabel });
+      window.location.assign(`${getApiBaseUrl()}/auth/github/login`);
+    } catch (err) {
+      patch({ remediationError: err instanceof Error ? err.message : "Unable to start GitHub sign-in" });
+    }
+  }, [patch]);
+
+  /**
+   * Real-findings-path counterpart to `approveFixes`: generates real
+   * remediations for the connected repository via
+   * `POST /repositories/{id}/remediate`. Requires a bearer token -- if
+   * none is stored yet, this triggers `signInWithGithub` instead of
+   * calling the (auth-gated) endpoint and hitting a guaranteed 401.
+   */
+  const startRemediation = useCallback(async () => {
+    const s = stateRef.current;
+    if (!s.repoId) return;
+    if (!s.sessionToken) {
+      signInWithGithub();
+      return;
+    }
+
+    patch({ remediationError: null, remediationLoading: true, remediationSummary: null });
+    morphTo(3);
+
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/repositories/${s.repoId}/remediate`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${s.sessionToken}` },
+      });
+
+      if (response.status === 401) {
+        // Stored token is stale/expired/revoked -- drop it and send the
+        // user through sign-in again rather than surfacing a bare 401
+        // (a 401 for a still-logged-in user is treated as a bug, not this).
+        clearStoredSessionToken();
+        patch({ sessionToken: null, remediationLoading: false });
+        signInWithGithub();
+        return;
+      }
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        const detail = body && typeof body.detail === "string" ? body.detail : null;
+        patch({ remediationError: detail ?? `Remediation request failed (${response.status})`, remediationLoading: false });
+        return;
+      }
+
+      const data = await response.json();
+      patch({
+        realRemediations: data.remediations ?? [],
+        remediationSummary: {
+          attempted: data.attempted ?? 0,
+          succeeded: data.succeeded ?? 0,
+          filesOverCap: data.files_over_cap ?? 0,
+        },
+        remediationLoading: false,
+      });
+      morphTo(4);
+    } catch (err) {
+      patch({ remediationError: err instanceof Error ? err.message : "Failed to reach the server", remediationLoading: false });
+    }
+  }, [patch, morphTo, signInWithGithub]);
+
+  /** Approves (pushes) or rejects one proposed remediation, per `POST /remediations/{id}/approve|reject`. */
+  const decideRemediation = useCallback(
+    async (remediationId: number, decision: "approve" | "reject") => {
+      const s = stateRef.current;
+      if (!s.sessionToken) {
+        signInWithGithub();
+        return;
+      }
+
+      patch((prev) => {
+        const next = new Set(prev.decidingRemediationIds);
+        next.add(remediationId);
+        return { decidingRemediationIds: next, remediationError: null };
+      });
+
+      try {
+        const response = await fetch(`${getApiBaseUrl()}/remediations/${remediationId}/${decision}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${s.sessionToken}` },
+          body: JSON.stringify(decision === "approve" ? { target_branch: null } : { decision_reason: null }),
+        });
+
+        if (response.status === 401) {
+          clearStoredSessionToken();
+          patch({ sessionToken: null });
+          signInWithGithub();
+          return;
+        }
+        if (!response.ok) {
+          const body = await response.json().catch(() => null);
+          const detail = body && typeof body.detail === "string" ? body.detail : null;
+          patch({ remediationError: detail ?? `Request failed (${response.status})` });
+          return;
+        }
+
+        const updated: RealRemediation = await response.json();
+        patch((prev) => ({
+          realRemediations: prev.realRemediations.map((r) => (r.id === updated.id ? updated : r)),
+        }));
+      } catch (err) {
+        patch({ remediationError: err instanceof Error ? err.message : "Failed to reach the server" });
+      } finally {
+        patch((prev) => {
+          const next = new Set(prev.decidingRemediationIds);
+          next.delete(remediationId);
+          return { decidingRemediationIds: next };
+        });
+      }
+    },
+    [patch, signInWithGithub],
+  );
+
+  /** Leaves the real remediation review screen for the real-path "done" summary. */
+  const finishRemediationReview = useCallback(() => morphTo(5), [morphTo]);
+
   const resetFlow = useCallback(() => {
     clearTimers();
     patch((prev) => ({
@@ -794,6 +1094,16 @@ export function useVibecheckFlow(options: VibecheckOptions = {}) {
       scanResults: "",
       scanResultsLoading: false,
       realFindings: [],
+      selectedFindingIds: new Set(),
+      sessionRestoring: false,
+      realRemediations: [],
+      remediationSummary: null,
+      remediationLoading: false,
+      remediationError: null,
+      decidingRemediationIds: new Set(),
+      // sessionToken is deliberately NOT cleared here -- resetFlow starts a
+      // new check, not a logout, and the user shouldn't have to re-auth
+      // with GitHub for every repo they check in one browser session.
     }));
   }, [clearTimers, patch]);
 
@@ -831,6 +1141,11 @@ export function useVibecheckFlow(options: VibecheckOptions = {}) {
       setFindingStatus,
       approveFixes,
       openPR,
+      toggleFindingSelection,
+      signInWithGithub,
+      startRemediation,
+      decideRemediation,
+      finishRemediationReview,
       resetFlow,
       scrollToFinding,
       scrollToDiff,
@@ -864,6 +1179,11 @@ export function useVibecheckFlow(options: VibecheckOptions = {}) {
       setFindingStatus,
       approveFixes,
       openPR,
+      toggleFindingSelection,
+      signInWithGithub,
+      startRemediation,
+      decideRemediation,
+      finishRemediationReview,
       resetFlow,
       scrollToFinding,
       scrollToDiff,

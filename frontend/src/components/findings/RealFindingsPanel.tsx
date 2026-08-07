@@ -1,7 +1,8 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import type { VibecheckState, RealFindingSeverity } from "../../hooks/useVibecheckFlow";
 import { useVibecheckFlow } from "../../hooks/useVibecheckFlow";
 import { RealFindingCard } from "./RealFindingCard";
+import { WarningIcon } from "../icons";
 
 type Actions = ReturnType<typeof useVibecheckFlow>["actions"];
 
@@ -30,23 +31,14 @@ export function RealFindingsPanel({ state, actions }: RealFindingsPanelProps) {
     [state.realFindings],
   );
 
-  // Selection defaults to "all findings selected to fix" -- initialized once
-  // from the findings this panel mounted with. The panel remounts fresh on
-  // every new scan (App only renders it while screen === 2), so this never
-  // goes stale against a later scan's findings.
-  const [selected, setSelected] = useState<Set<number>>(() => new Set(sorted.map((f) => f.id)));
-
-  const toggle = (id: number) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
+  // Selection lives in shared flow state (state.selectedFindingIds,
+  // defaulted to "all findings selected" when the findings were fetched)
+  // rather than panel-local state, so it composes with
+  // actions.startRemediation -- see useVibecheckFlow.ts.
+  const selected = state.selectedFindingIds;
   const selectedCount = selected.size;
   const totalCount = sorted.length;
+  const canProceed = selectedCount > 0 && !state.remediationLoading;
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", gap: 16, padding: "clamp(10px, 1.8vh, 20px) 0 clamp(6px, 1vh, 12px)" }}>
@@ -71,37 +63,99 @@ export function RealFindingsPanel({ state, actions }: RealFindingsPanelProps) {
             {selectedCount}/{totalCount} Fixes to Resolve
           </span>
         </div>
-        <button
-          onClick={actions.resetFlow}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+          <button
+            onClick={actions.resetFlow}
+            style={{
+              flexShrink: 0,
+              whiteSpace: "nowrap",
+              background: "rgba(255,255,255,0.07)",
+              color: "rgba(255,255,255,0.85)",
+              border: "1px solid rgba(255,255,255,0.16)",
+              height: 46,
+              padding: "0 22px",
+              borderRadius: 16,
+              fontSize: 14.5,
+              fontWeight: 700,
+              cursor: "pointer",
+              fontFamily: "inherit",
+              transition: "background 0.13s ease",
+            }}
+          >
+            Check Another App
+          </button>
+          <button
+            onClick={actions.startRemediation}
+            disabled={!canProceed}
+            title={state.sessionToken ? undefined : "Signs you in with GitHub first"}
+            style={
+              canProceed
+                ? {
+                    flexShrink: 0,
+                    whiteSpace: "nowrap",
+                    background: "#35E0C8",
+                    color: "#04120F",
+                    border: "none",
+                    height: 46,
+                    padding: "0 24px",
+                    borderRadius: 16,
+                    fontSize: 14.5,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    transition: "background 0.13s ease",
+                  }
+                : {
+                    flexShrink: 0,
+                    whiteSpace: "nowrap",
+                    background: "rgba(255,255,255,0.07)",
+                    color: "rgba(255,255,255,0.35)",
+                    border: "1px solid rgba(255,255,255,0.12)",
+                    height: 46,
+                    padding: "0 24px",
+                    borderRadius: 16,
+                    fontSize: 14.5,
+                    fontWeight: 700,
+                    cursor: "not-allowed",
+                    fontFamily: "inherit",
+                  }
+            }
+          >
+            {state.remediationLoading
+              ? "Generating fixes…"
+              : state.sessionToken
+                ? `Fix ${selectedCount} now`
+                : `Sign in & fix ${selectedCount}`}
+          </button>
+        </div>
+      </div>
+
+      {state.remediationError && (
+        <div
           style={{
             flexShrink: 0,
-            whiteSpace: "nowrap",
-            background: "rgba(255,255,255,0.07)",
-            color: "rgba(255,255,255,0.85)",
-            border: "1px solid rgba(255,255,255,0.16)",
-            height: 46,
-            padding: "0 22px",
-            borderRadius: 16,
-            fontSize: 14.5,
-            fontWeight: 700,
-            cursor: "pointer",
-            fontFamily: "inherit",
-            transition: "background 0.13s ease",
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            background: "rgba(255,107,90,0.12)",
+            border: "1px solid rgba(255,107,90,0.4)",
+            borderRadius: 18,
+            padding: "12px 18px",
           }}
         >
-          Check Another App
-        </button>
-      </div>
+          <WarningIcon size={19} style={{ flexShrink: 0 }} />
+          <span style={{ fontSize: 14.5, color: "#FFD9D3", lineHeight: 1.4 }}>{state.remediationError}</span>
+        </div>
+      )}
 
       <div className="vc-noscroll" style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 14 }}>
         {sorted.map((finding) => (
           <RealFindingCard
             key={finding.id}
             finding={finding}
-            owner={owner}
-            repo={repo}
+            repoId={state.repoId}
             checked={selected.has(finding.id)}
-            onToggle={() => toggle(finding.id)}
+            onToggle={() => actions.toggleFindingSelection(finding.id)}
           />
         ))}
       </div>

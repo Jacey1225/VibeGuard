@@ -3,6 +3,7 @@ import type { VibecheckState } from "../../hooks/useVibecheckFlow";
 import { useVibecheckFlow } from "../../hooks/useVibecheckFlow";
 import { splitSnippet } from "../../utils/snippet";
 import { CheckCircleFilledIcon, WarningIcon } from "../icons";
+import { RealRemediationDoneScreen } from "./RealRemediationDoneScreen";
 
 type Actions = ReturnType<typeof useVibecheckFlow>["actions"];
 
@@ -11,13 +12,17 @@ interface DoneScreenProps {
   actions: Actions;
 }
 
-/** Screen 5: full-screen "done" overlay summarizing what was fixed and what's left. */
+/** Screen 5: full-screen "done" overlay summarizing what was fixed and what's left. Real-findings path renders RealRemediationDoneScreen instead. */
 export function DoneScreen({ state, actions }: DoneScreenProps) {
   const queuedFindings = useMemo(() => state.findings.filter((f) => f.status === "queued"), [state.findings]);
   const skippedAny = state.findings.filter((f) => f.status !== "queued");
   const queuedCount = queuedFindings.length;
 
   const achievements = queuedFindings.map((f) => splitSnippet(f.id).achievement);
+
+  if (state.realFindings.length > 0) {
+    return <RealRemediationDoneScreen state={state} actions={actions} />;
+  }
 
   return (
     <div

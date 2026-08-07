@@ -1,15 +1,20 @@
 import { useMemo } from "react";
 import type { VibecheckState } from "../../hooks/useVibecheckFlow";
+import { useVibecheckFlow } from "../../hooks/useVibecheckFlow";
 import { splitSnippet, sliceAround } from "../../utils/snippet";
 import { FixCard, type FixBlockData } from "../fixing/FixCard";
 import { CheckCircleFilledIcon, SpinnerIcon } from "../icons";
+import { RealRemediationScreen } from "./RealRemediationScreen";
+
+type Actions = ReturnType<typeof useVibecheckFlow>["actions"];
 
 interface FixingScreenProps {
   state: VibecheckState;
+  actions: Actions;
 }
 
-/** Screen 3: simulated fix-in-progress stack, one card per queued finding, then a validate step. */
-export function FixingScreen({ state }: FixingScreenProps) {
+/** Screen 3: simulated fix-in-progress stack, one card per queued finding, then a validate step. Real-findings path renders RealRemediationScreen instead (see useVibecheckFlow's startRemediation). */
+export function FixingScreen({ state, actions }: FixingScreenProps) {
   const stageH = state.stageH;
   const codeRows = Math.max(3, Math.floor((stageH - 96) / 22));
 
@@ -45,6 +50,10 @@ export function FixingScreen({ state }: FixingScreenProps) {
   const validateDone = validateStep.status === "done";
   const validateRunning = validateStep.status === "running";
   const doneFixCount = fixSteps.filter((s) => s.status === "done").length;
+
+  if (state.realFindings.length > 0) {
+    return <RealRemediationScreen state={state} actions={actions} />;
+  }
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "clamp(12px, 2vh, 24px)" }}>

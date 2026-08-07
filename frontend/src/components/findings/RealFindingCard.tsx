@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import type { RealFinding, RealFindingSeverity } from "../../hooks/useVibecheckFlow";
+import { getApiBaseUrl } from "../../hooks/useVibecheckFlow";
+import { normalizeRelativePath } from "../../utils/path";
 import { FileIcon, WarningIcon } from "../icons";
 import { FONT } from "../../styles/tokens";
 
 interface RealFindingCardProps {
   finding: RealFinding;
-  owner: string;
-  repo: string;
+  repoId: string | null;
   checked: boolean;
   onToggle: () => void;
 }
@@ -30,29 +31,19 @@ const SEVERITY_STYLE: Record<RealFindingSeverity, { bg: string; border: string; 
   info: { bg: "rgba(255,255,255,0.05)", border: "rgba(255,255,255,0.14)", accent: "rgba(255,255,255,0.5)", label: "Info" },
 };
 
-const CONTEXT_LINES_BEFORE = 5;
-const CONTEXT_LINES_AFTER = 5;
-
-/** Decodes a GitHub Contents API base64 payload (which may contain embedded newlines) as UTF-8 text. */
-function decodeBase64Utf8(base64: string): string {
-  const binary = atob(base64.replace(/\n/g, ""));
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return new TextDecoder("utf-8").decode(bytes);
-}
-
-function normalizePath(relativePath: string): string {
-  return relativePath.replace(/\\/g, "/");
-}
-
 /**
  * Fetches a windowed preview of the real file a finding points at, centered
- * on its line number. Findings with no line number (e.g. the
- * dependency-manifest heuristic) never had a specific line to locate, so no
- * fetch is made at all -- the card falls back to a file-only reference with
- * no code shown, per the same rule as a preview that fails to resolve.
+ * on its line number, from the backend's already-cloned scan copy
+ * (`GET /repositories/{id}/files/preview`) -- never a live, unauthenticated
+ * call to api.github.com. This is served straight from what was actually
+ * scanned, so it can't drift, can't hit GitHub's per-IP rate limit, and
+ * works for private/inaccessible repos the browser has no credential for.
+ * Findings with no line number (e.g. the dependency-manifest heuristic)
+ * never had a specific line to locate, so no fetch is made at all -- the
+ * card falls back to a file-only reference with no code shown, per the
+ * same rule as a preview that fails to resolve.
  */
-function usePreview(finding: RealFinding, owner: string, repo: string): PreviewState {
+function usePreview(finding: RealFinding, repoId: string | null): PreviewState {
   const [state, setState] = useState<PreviewState>(finding.line_number ? { status: "loading" } : { status: "skipped" });
 
   useEffect(() => {
@@ -60,58 +51,64 @@ function usePreview(finding: RealFinding, owner: string, repo: string): PreviewS
       setState({ status: "skipped" });
       return;
     }
+    if (!repoId) {
+      setState({ status: "error", message: "No repository connected" });
+      return;
+    }
 
     let cancelled = false;
     setState({ status: "loading" });
 
-    const path = normalizePath(finding.relative_path);
-    const encodedPath = path.split("/").map(encodeURIComponent).join("/");
+    const path = normalizeRelativePath(finding.relative_path);
     const lineNumber = finding.line_number;
 
-    fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${encodedPath}`, {
-      headers: { Accept: "application/vnd.github.v3+json" },
-    })
+    let url: string;
+    try {
+      url = `${getApiBaseUrl()}/repositories/${repoId}/files/preview?path=${encodeURIComponent(path)}&line=${lineNumber}`;
+    } catch (err) {
+      setState({ status: "error", message: err instanceof Error ? err.message : "Preview unavailable" });
+      return;
+    }
+
+    fetch(url)
       .then(async (res) => {
-        if (!res.ok) throw new Error(`GitHub returned ${res.status}`);
+        if (!res.ok) {
+          // 404 (repo/file not found) and 422 (binary/oversized file, or
+          // line outside the file's current stored length) both carry a
+          // specific `detail` message from the backend -- surface that
+          // directly instead of a generic status-code string.
+          const body = await res.json().catch(() => null);
+          const detail = body && typeof body.detail === "string" ? body.detail : null;
+          throw new Error(detail ?? `Preview request failed (${res.status})`);
+        }
         const data = await res.json();
-        if (data.encoding !== "base64" || typeof data.content !== "string") {
-          throw new Error("File is not previewable (binary or too large)");
-        }
-        const text = decodeBase64Utf8(data.content);
-        const allLines = text.split("\n");
-
-        const centerIdx = lineNumber - 1;
-        if (centerIdx < 0 || centerIdx >= allLines.length) {
-          throw new Error("Reported line is outside the file's current length");
-        }
-
-        const startIdx = Math.max(0, centerIdx - CONTEXT_LINES_BEFORE);
-        const endIdx = Math.min(allLines.length, centerIdx + CONTEXT_LINES_AFTER + 1);
-
-        const lines: PreviewLine[] = allLines.slice(startIdx, endIdx).map((text, i) => ({
-          num: startIdx + i + 1,
-          text: text === "" ? " " : text,
+        const lines: PreviewLine[] = (data.lines ?? []).map((line: { number: number; text: string }) => ({
+          num: line.number,
+          text: line.text === "" ? " " : line.text,
         }));
-
-        if (!cancelled) setState({ status: "ready", lines, highlightLine: lineNumber });
+        if (!cancelled) setState({ status: "ready", lines, highlightLine: data.highlight_line });
       })
       .catch((err) => {
+        // A thrown TypeError here (the browser's literal "failed to fetch"
+        // message) means a network-level failure reaching our own backend
+        // -- distinct from, and much rarer than, the old direct-to-GitHub
+        // rate-limit/CORS failures this replaces.
         if (!cancelled) setState({ status: "error", message: err instanceof Error ? err.message : "Preview unavailable" });
       });
 
     return () => {
       cancelled = true;
     };
-  }, [finding.relative_path, finding.line_number, owner, repo]);
+  }, [finding.relative_path, finding.line_number, repoId]);
 
   return state;
 }
 
 /** One real finding: severity-colored card with a selection checkbox, description, location, and (when a line is located) a live highlighted code preview. */
-export function RealFindingCard({ finding, owner, repo, checked, onToggle }: RealFindingCardProps) {
-  const preview = usePreview(finding, owner, repo);
+export function RealFindingCard({ finding, repoId, checked, onToggle }: RealFindingCardProps) {
+  const preview = usePreview(finding, repoId);
   const style = SEVERITY_STYLE[finding.severity] ?? SEVERITY_STYLE.info;
-  const path = normalizePath(finding.relative_path);
+  const path = normalizeRelativePath(finding.relative_path);
   const location = finding.line_number ? `${path}:${finding.line_number}` : path;
   const showsNoCode = preview.status === "skipped" || preview.status === "error";
 

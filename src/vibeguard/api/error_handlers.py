@@ -96,3 +96,18 @@ async def handle_remediation_push_permission_denied(
 async def handle_remediation_push_unavailable(request: Request, exc: Exception) -> JSONResponse:
     """Return 502 when GitHub's API couldn't be reached or failed unexpectedly during a push."""
     return JSONResponse(status_code=502, content={"detail": "GitHub API unavailable, try again"})
+
+
+async def handle_file_not_found_in_repository(request: Request, exc: Exception) -> JSONResponse:
+    """Return 404 when no file was stored at the requested path for this repository."""
+    return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+
+async def handle_file_not_previewable(request: Request, exc: Exception) -> JSONResponse:
+    """Return 422 when the matched file has no stored content (skipped during intake)."""
+    return JSONResponse(status_code=422, content={"detail": str(exc)})
+
+
+async def handle_line_out_of_range(request: Request, exc: Exception) -> JSONResponse:
+    """Return 422 when the requested line number is outside the file's current stored length."""
+    return JSONResponse(status_code=422, content={"detail": str(exc)})

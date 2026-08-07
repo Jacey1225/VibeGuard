@@ -7,7 +7,7 @@ import { splitSnippet, sliceAround } from "../../utils/snippet";
 import { FindingCard, type AnnotatedFinding } from "../findings/FindingCard";
 import { FindingDots } from "../findings/FindingDots";
 import { RealFindingsPanel } from "../findings/RealFindingsPanel";
-import { WarningIcon } from "../icons";
+import { WarningIcon, SpinnerIcon } from "../icons";
 
 type Actions = ReturnType<typeof useVibecheckFlow>["actions"];
 
@@ -57,6 +57,19 @@ export function FindingsScreen({ state, actions }: FindingsScreenProps) {
 
   if (state.realFindings.length > 0) {
     return <RealFindingsPanel state={state} actions={actions} />;
+  }
+
+  // A brief window right after an OAuth-redirect restore lands here
+  // (screen 2) but before its findings have been re-fetched --
+  // realFindings is still empty at that instant, which would otherwise
+  // fall through to the fixture demo panel below.
+  if (state.sessionRestoring) {
+    return (
+      <div style={{ flex: 1, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center", gap: 14 }}>
+        <SpinnerIcon size={22} style={{ animation: "vc-spin 0.8s linear infinite" }} />
+        <span style={{ fontSize: 15, color: "rgba(255,255,255,0.55)" }}>Resuming your check…</span>
+      </div>
+    );
   }
 
   return (

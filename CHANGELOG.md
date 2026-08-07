@@ -2,7 +2,49 @@
 
 ## Unreleased
 
+### Added
+
+- `GET /repositories/{id}/files/preview`: a windowed, line-numbered
+  preview of one stored file, centered on a reported line — the
+  backend half of fixing the real-findings Decide screen's file
+  preview, which previously fetched `api.github.com` directly from the
+  browser, unauthenticated, once per finding card (hitting GitHub's
+  60-req/hour unauthenticated rate limit on any scan with more than a
+  handful of findings, and 404ing on inaccessible repos with no
+  distinguishable error). Served entirely from `repository_files`
+  (populated during intake) — never a live GitHub call — so the
+  preview can't drift from what was actually scanned and needs no
+  GitHub credential from the caller. Distinct `404`/`422` responses for
+  a missing file, a file skipped during intake as binary/oversized, and
+  a requested line outside the file's current stored length, so the
+  frontend can show a specific message instead of a bare
+  "failed to fetch". No auth required, matching `GET .../findings`.
+
 ### Fixed
+
+- Frontend, real-findings Decide screen (`RealFindingCard.tsx`): file
+  preview now calls the new `GET /repositories/{id}/files/preview`
+  instead of an unauthenticated, per-card `fetch` straight to
+  `api.github.com` — fixes the "failed to fetch" errors that showed up
+  on any scan with more than a handful of findings (GitHub's 60/hour
+  unauthenticated rate limit) or on a private/inaccessible repo. 404 and
+  422 responses now surface the backend's specific message (missing
+  file, binary/oversized file skipped at intake, line outside the
+  file's current length) instead of a bare network-error string.
+- Frontend, real-findings path: the Decide screen now has a working
+  "Fix N now" action, and the previously-simulated Fix/Review/Done
+  screens (screens 3-5) are replaced, for this path only, with
+  `RealRemediationScreen` / `RealRemediationReviewScreen` /
+  `RealRemediationDoneScreen`, which call the real
+  `POST /repositories/{id}/remediate` and
+  `POST /remediations/{id}/approve|reject` routes instead of running the
+  fixture-data simulation. The fixture-only demo path (paste-code
+  without a connected repo) is unaffected. The app now completes the
+  existing GitHub OAuth flow itself (`GET /auth/github/login` →
+  `/auth/github/callback` → bearer token read from the redirect's URL
+  fragment) to obtain the token these routes require, storing it in
+  `sessionStorage` (tab-scoped, never `localStorage`) rather than
+  requiring a separate sign-in step.
 
 - Frontend (`useVibecheckFlow.ts`): removed a hardcoded
   `http://localhost:8000` fallback that let backend requests
