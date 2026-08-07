@@ -6,6 +6,7 @@ import { sortFindingsBySeverity } from "../../utils/severity";
 import { splitSnippet, sliceAround } from "../../utils/snippet";
 import { FindingCard, type AnnotatedFinding } from "../findings/FindingCard";
 import { FindingDots } from "../findings/FindingDots";
+import { RealFindingsPanel } from "../findings/RealFindingsPanel";
 import { WarningIcon } from "../icons";
 
 type Actions = ReturnType<typeof useVibecheckFlow>["actions"];
@@ -53,6 +54,10 @@ export function FindingsScreen({ state, actions }: FindingsScreenProps) {
     if (f.status === "skipped") return "rgba(255,255,255,0.3)";
     return SEVERITY[f.severity].color;
   };
+
+  if (state.realFindings.length > 0) {
+    return <RealFindingsPanel state={state} actions={actions} />;
+  }
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", gap: 12, padding: "clamp(10px, 1.8vh, 20px) 0 clamp(6px, 1vh, 12px)" }}>

@@ -15,6 +15,22 @@ export interface RepositoryFile {
   isEllipsis?: boolean;
 }
 
+export type RealFindingSeverity = "info" | "low" | "medium" | "high" | "critical";
+
+export interface RealFinding {
+  id: number;
+  category: string;
+  severity: RealFindingSeverity;
+  source: "heuristic_only" | "heuristic_confirmed";
+  title: string;
+  description: string;
+  remediation: string;
+  relative_path: string;
+  line_number: number | null;
+  model: string | null;
+  created_at: string;
+}
+
 export interface VibecheckState {
   screen: number;
   morphing: boolean;
@@ -45,6 +61,7 @@ export interface VibecheckState {
   suggestedRepoUrl: string | null;
   scanResults: string;
   scanResultsLoading: boolean;
+  realFindings: RealFinding[];
 }
 
 const PLACEHOLDER_ROTATE_MS = 3200;
@@ -110,6 +127,7 @@ function initialState(): VibecheckState {
     suggestedRepoUrl: null,
     scanResults: "",
     scanResultsLoading: false,
+    realFindings: [],
   };
 }
 
@@ -275,6 +293,7 @@ export function useVibecheckFlow(options: VibecheckOptions = {}) {
         }
 
         const { findings } = await findingsResponse.json();
+        patch({ realFindings: findings });
 
         const counts = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
         for (const f of findings) {
@@ -774,6 +793,7 @@ export function useVibecheckFlow(options: VibecheckOptions = {}) {
       suggestedRepoUrl: null,
       scanResults: "",
       scanResultsLoading: false,
+      realFindings: [],
     }));
   }, [clearTimers, patch]);
 
