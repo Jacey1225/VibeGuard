@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, UIEvent } from "react";
 import { EXAMPLE_CODE, INITIAL_FINDINGS, PIPELINE_TOTAL_TICKS, PLACEHOLDERS, SCOPE_ITEMS } from "../data/fixtures";
-import { detectLanguage } from "../utils/detectLanguage";
+import { detectLanguage, snippetFilename } from "../utils/detectLanguage";
 import type { Finding, FindingStatus, ImplementStep } from "../types";
 
 export interface VibecheckOptions {
@@ -61,6 +61,30 @@ export interface RemediationGenerationSummary {
   filesOverCap: number;
 }
 
+/**
+ * One finding within a plain-text snippet scan. Same wire shape as
+ * `RealFinding` -- both come from `FindingResponse` in
+ * `src/vibeguard/api/finding_schemas.py` -- aliased under its own name so
+ * snippet-scoped state/props read clearly and never get confused for a
+ * repository-scoped finding.
+ */
+export type SnippetFinding = RealFinding;
+
+/**
+ * One user-authored fix a caller pasted for a snippet finding. Mirrors
+ * `SnippetFixSubmissionResponse` in
+ * `src/vibeguard/api/snippet_fix_submission_schemas.py`. Deliberately not
+ * shaped like `RealRemediation` -- no status, no diff, no push lifecycle,
+ * just what the user submitted.
+ */
+export interface SnippetFixSubmission {
+  id: number;
+  snippet_finding_id: number;
+  fixed_content: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface VibecheckState {
   screen: number;
   morphing: boolean;
@@ -104,6 +128,14 @@ export interface VibecheckState {
   remediationError: string | null;
   /** Remediation ids with an approve/reject request in flight, for per-card loading state. */
   decidingRemediationIds: Set<number>;
+  /** Text typed into the "Scan pasted code — no GitHub needed" panel, before submission. Fully separate from `codeInput`/`repoUrlInput` -- this path never touches the fixture demo or a connected repository. */
+  snippetPasteInput: string;
+  snippetPasteLoading: boolean;
+  snippetPasteError: string | null;
+  snippetId: string | null;
+  /** The submitted snippet's own text, captured at submission time -- `SnippetFindingCard` slices context lines from this client-side, since a snippet has no stored server-side file to preview. */
+  snippetContent: string;
+  snippetFindings: SnippetFinding[];
 }
 
 const PLACEHOLDER_ROTATE_MS = 3200;
@@ -232,6 +264,12 @@ function initialState(): VibecheckState {
     remediationLoading: false,
     remediationError: null,
     decidingRemediationIds: new Set(),
+    snippetPasteInput: "",
+    snippetPasteLoading: false,
+    snippetPasteError: null,
+    snippetId: null,
+    snippetContent: "",
+    snippetFindings: [],
   };
 }
 
@@ -853,6 +891,92 @@ export function useVibecheckFlow(options: VibecheckOptions = {}) {
     runtime.current.inputEl?.focus();
   }, [patch]);
 
+  const onSnippetPasteInput = useCallback(
+    (e: ChangeEvent<HTMLTextAreaElement>) => patch({ snippetPasteInput: e.target.value }),
+    [patch],
+  );
+  const clearSnippetPasteError = useCallback(() => patch({ snippetPasteError: null }), [patch]);
+
+  /**
+   * The GitHub-free entry point: `POST /snippets` (stores the pasted text)
+   * then `POST /snippets/{id}/scan` (runs the real scan and blocks until
+   * it's done), then jumps straight to the findings screen -- no GitHub
+   * OAuth redirect, no GitHub API call, anywhere in this path. Both
+   * requests are synchronous from the caller's point of view, so there's
+   * no separate "scanning" screen to visit; `snippetPasteLoading` covers
+   * the whole round trip the same way `repoUrlLoading` covers
+   * `submitRepoUrl`.
+   */
+  const submitSnippetPaste = useCallback(async () => {
+    const content = stateRef.current.snippetPasteInput;
+    if (!content.trim()) return;
+
+    patch({ snippetPasteLoading: true, snippetPasteError: null });
+
+    try {
+      const submitResponse = await fetch(`${getApiBaseUrl()}/snippets`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content, filename: snippetFilename(content) }),
+      });
+
+      if (!submitResponse.ok) {
+        patch({ snippetPasteLoading: false, snippetPasteError: `Failed to submit code (${submitResponse.status})` });
+        return;
+      }
+
+      const snippet = await submitResponse.json();
+
+      if (snippet.status === "rejected") {
+        const friendlyErrors: Record<string, string> = {
+          empty_content: "That code looks empty -- paste something to scan",
+          too_large: "That snippet is too large to scan",
+        };
+        const errorMsg = friendlyErrors[snippet.rejection_reason] ?? snippet.rejection_reason ?? "That snippet was rejected";
+        patch({ snippetPasteLoading: false, snippetPasteError: errorMsg });
+        return;
+      }
+
+      const scanResponse = await fetch(`${getApiBaseUrl()}/snippets/${snippet.id}/scan`, { method: "POST" });
+      if (!scanResponse.ok) {
+        patch({ snippetPasteLoading: false, snippetPasteError: `Scan failed (${scanResponse.status})` });
+        return;
+      }
+
+      const findingsResponse = await fetch(`${getApiBaseUrl()}/snippets/${snippet.id}/findings`);
+      if (!findingsResponse.ok) {
+        patch({ snippetPasteLoading: false, snippetPasteError: `Failed to load findings (${findingsResponse.status})` });
+        return;
+      }
+      const { findings } = await findingsResponse.json();
+
+      patch({
+        snippetPasteLoading: false,
+        snippetPasteInput: "",
+        snippetId: String(snippet.id),
+        snippetContent: content,
+        snippetFindings: findings,
+        sourceMenuOpen: false,
+        screen: 2,
+      });
+    } catch (err) {
+      patch({ snippetPasteLoading: false, snippetPasteError: err instanceof Error ? err.message : "Failed to reach the server" });
+    }
+  }, [patch]);
+
+  /** Clears the snippet-scan path's state and returns to the composer -- the snippet-scan counterpart to `resetFlow`, scoped only to the fields that path owns. */
+  const resetSnippetFlow = useCallback(() => {
+    patch({
+      screen: 0,
+      snippetId: null,
+      snippetContent: "",
+      snippetFindings: [],
+      snippetPasteInput: "",
+      snippetPasteLoading: false,
+      snippetPasteError: null,
+    });
+  }, [patch]);
+
   const submitComposer = useCallback(() => {
     const s = stateRef.current;
     if (!s.codeInput.trim() && !s.attached) return;
@@ -1134,6 +1258,10 @@ export function useVibecheckFlow(options: VibecheckOptions = {}) {
       connectGithub,
       submitRepoUrl,
       pasteExample,
+      onSnippetPasteInput,
+      clearSnippetPasteError,
+      submitSnippetPaste,
+      resetSnippetFlow,
       submitComposer,
       goToFindings,
       handleFindingScroll,
@@ -1172,6 +1300,10 @@ export function useVibecheckFlow(options: VibecheckOptions = {}) {
       connectGithub,
       submitRepoUrl,
       pasteExample,
+      onSnippetPasteInput,
+      clearSnippetPasteError,
+      submitSnippetPaste,
+      resetSnippetFlow,
       submitComposer,
       goToFindings,
       handleFindingScroll,

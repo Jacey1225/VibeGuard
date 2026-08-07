@@ -7,6 +7,7 @@ import { splitSnippet, sliceAround } from "../../utils/snippet";
 import { FindingCard, type AnnotatedFinding } from "../findings/FindingCard";
 import { FindingDots } from "../findings/FindingDots";
 import { RealFindingsPanel } from "../findings/RealFindingsPanel";
+import { SnippetFindingsPanel } from "../findings/SnippetFindingsPanel";
 import { WarningIcon, SpinnerIcon } from "../icons";
 
 type Actions = ReturnType<typeof useVibecheckFlow>["actions"];
@@ -54,6 +55,15 @@ export function FindingsScreen({ state, actions }: FindingsScreenProps) {
     if (f.status === "skipped") return "rgba(255,255,255,0.3)";
     return SEVERITY[f.severity].color;
   };
+
+  // Checked by `snippetId` (set once `POST /snippets/{id}/scan` completes),
+  // not `snippetFindings.length > 0` -- a scan with zero findings still
+  // needs this branch so `SnippetFindingsPanel` can render its own
+  // positive "no vulnerabilities found" empty state instead of falling
+  // through to the fixture demo below.
+  if (state.snippetId !== null) {
+    return <SnippetFindingsPanel state={state} actions={actions} />;
+  }
 
   if (state.realFindings.length > 0) {
     return <RealFindingsPanel state={state} actions={actions} />;

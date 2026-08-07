@@ -364,6 +364,64 @@ shape to `GET /repositories/{id}/findings` above.
 | No snippet with this id | `404` |
 | Findings returned (empty list if none) | `200` |
 
+## `POST /snippets/{id}/findings/{finding_id}/fix`
+
+Attach the caller's own already-fixed plain-text code to one snippet
+finding. Unlike `POST /repositories/{id}/remediate`, this is **not**
+LLM-generated and there is no approve/reject/push lifecycle — the
+caller pastes code they already wrote themselves, and it's just
+recorded. No authentication, same as every other snippet-path endpoint
+— there's no GitHub connection anywhere in this flow.
+
+Resubmitting for the same finding **overwrites** the prior submission
+rather than erroring — there's no reviewer other than the submitter and
+nothing to reconcile.
+
+### Request body
+
+```json
+{
+  "fixed_content": "cursor.execute(\"SELECT * FROM users WHERE id = %s\", (user_id,))"
+}
+```
+
+### Response body
+
+```json
+{
+  "id": 1,
+  "snippet_finding_id": 4,
+  "fixed_content": "cursor.execute(\"SELECT * FROM users WHERE id = %s\", (user_id,))",
+  "created_at": "2026-08-07T00:00:00.000000-07:00",
+  "updated_at": "2026-08-07T00:00:00.000000-07:00"
+}
+```
+
+`snippet_finding_id` deliberately doesn't nest under a `remediation`-
+shaped object or field name anywhere in this response —
+`SnippetFindingModel.remediation` already means scan-produced fix
+*guidance* text, a different thing from this user-submitted fix.
+
+### HTTP status codes
+
+| Condition | HTTP status |
+|---|---|
+| `fixed_content` empty (after stripping whitespace) or over the shared per-file size budget (`max_file_size_bytes`) | `422` |
+| No snippet with this id, or no finding with this id for this snippet | `404` |
+| Submitted (created or overwritten) | `200` |
+
+## `GET /snippets/{id}/findings/{finding_id}/fix`
+
+Return the fix previously submitted for one snippet finding.
+
+### HTTP status codes
+
+| Condition | HTTP status |
+|---|---|
+| No snippet with this id, or no finding with this id for this snippet | `404` |
+| Finding exists but no fix has been submitted yet | `404` |
+| Fix returned | `200` |
+
 ## `GET /auth/github/login`
 
 Redirects the browser to GitHub's OAuth consent screen, requesting

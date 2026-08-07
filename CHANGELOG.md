@@ -4,6 +4,19 @@
 
 ### Added
 
+- `POST`/`GET /snippets/{id}/findings/{finding_id}/fix`: submit and read
+  back a user-authored fix for one snippet finding, attached directly
+  via a `snippet_finding_id` foreign key (`SnippetFixSubmission` /
+  `snippet_fix_submissions`, `fixed_content` field). This is not
+  LLM-generated and has no approve/reject/push lifecycle — the caller
+  pastes their own already-fixed plain-text code and it's just
+  recorded, since a snippet has no backing repository to push a fix to.
+  No authentication, same as the rest of the snippet path, so
+  GitHub-auth-free remediation is now possible end to end (submit code
+  → scan → see findings → attach a fix). Resubmitting for the same
+  finding overwrites the prior submission. `fixed_content` is capped by
+  the same per-file size budget (`max_file_size_bytes`) snippet intake
+  already enforces, and empty content is rejected with `422`.
 - `GET /repositories/{id}/files/preview`: a windowed, line-numbered
   preview of one stored file, centered on a reported line — the
   backend half of fixing the real-findings Decide screen's file
@@ -19,6 +32,21 @@
   a requested line outside the file's current stored length, so the
   frontend can show a specific message instead of a bare
   "failed to fetch". No auth required, matching `GET .../findings`.
+- Frontend: a real, GitHub-free way to reach the snippet-scan path end
+  to end. The composer's "+" menu gets a third option, "Scan pasted
+  code — no GitHub needed", which expands an inline paste panel and
+  calls `POST /snippets` then `POST /snippets/{id}/scan` directly (no
+  OAuth redirect, no GitHub API call anywhere in the path) before
+  landing on a new `SnippetFindingsPanel` screen — the first UI able to
+  reach `GET /snippets/{id}/findings` at all. Each finding renders on a
+  new `SnippetFindingCard` (code context sliced client-side from the
+  submitted text, since a snippet has no stored server-side file to
+  preview) with a three-state (idle/saving/submitted) fix-submission
+  control backed by the new `POST`/`GET
+  /snippets/{id}/findings/{finding_id}/fix` routes. Kept as fully
+  separate state (`snippetId`/`snippetContent`/`snippetFindings`) from
+  the existing repository-scoped and fixture-demo paths — none of the
+  three can bleed into each other.
 
 ### Fixed
 

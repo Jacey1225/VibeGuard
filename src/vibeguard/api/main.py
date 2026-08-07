@@ -31,6 +31,9 @@ from vibeguard.api.error_handlers import (
     handle_repository_not_found,
     handle_repository_not_ready_for_remediation,
     handle_repository_not_ready_for_scan,
+    handle_snippet_finding_not_found,
+    handle_snippet_fix_content_invalid,
+    handle_snippet_fix_submission_not_found,
     handle_snippet_not_found,
     handle_snippet_not_ready_for_scan,
     handle_unauthenticated,
@@ -40,6 +43,7 @@ from vibeguard.api.routes.file_previews import router as file_previews_router
 from vibeguard.api.routes.remediations import router as remediations_router
 from vibeguard.api.routes.repositories import router as repositories_router
 from vibeguard.api.routes.scans import router as scans_router
+from vibeguard.api.routes.snippet_fix_submissions import router as snippet_fix_submissions_router
 from vibeguard.api.routes.snippet_scans import router as snippet_scans_router
 from vibeguard.api.routes.snippets import router as snippets_router
 from vibeguard.core.file_preview import LineOutOfRangeError
@@ -53,6 +57,11 @@ from vibeguard.engine.remediation_decision import (
     RemediationPushUnavailableError,
 )
 from vibeguard.engine.remediation_generation import RepositoryNotReadyForRemediationError
+from vibeguard.engine.snippet_fix_submission import (
+    SnippetFindingNotFoundError,
+    SnippetFixContentInvalidError,
+    SnippetFixSubmissionNotFoundError,
+)
 from vibeguard.engine.snippet_scan import SnippetNotFoundError, SnippetNotReadyForScanError
 from vibeguard.engine.vuln_scan import RepositoryNotFoundError, RepositoryNotReadyForScanError
 
@@ -91,6 +100,7 @@ def create_app() -> FastAPI:
     app.include_router(remediations_router)
     app.include_router(snippets_router)
     app.include_router(snippet_scans_router)
+    app.include_router(snippet_fix_submissions_router)
     app.include_router(file_previews_router)
     app.add_exception_handler(InvalidRepositoryUrlError, handle_invalid_repository_url)
     app.add_exception_handler(GitHubApiUnavailableError, handle_github_api_unavailable)
@@ -101,6 +111,11 @@ def create_app() -> FastAPI:
     )
     app.add_exception_handler(SnippetNotFoundError, handle_snippet_not_found)
     app.add_exception_handler(SnippetNotReadyForScanError, handle_snippet_not_ready_for_scan)
+    app.add_exception_handler(SnippetFindingNotFoundError, handle_snippet_finding_not_found)
+    app.add_exception_handler(
+        SnippetFixSubmissionNotFoundError, handle_snippet_fix_submission_not_found
+    )
+    app.add_exception_handler(SnippetFixContentInvalidError, handle_snippet_fix_content_invalid)
     app.add_exception_handler(UnauthenticatedError, handle_unauthenticated)
     app.add_exception_handler(GitHubOAuthUnavailableError, handle_github_oauth_unavailable)
     app.add_exception_handler(GitHubOAuthResponseParseError, handle_github_oauth_login_failed)

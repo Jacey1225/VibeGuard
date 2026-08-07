@@ -10,3 +10,23 @@ export function detectLanguage(code: string): string {
   if (/\b(const |let |function |=>|require\(|import )/.test(t)) return "JavaScript";
   return "Code";
 }
+
+/** Maps `detectLanguage`'s guess to a file extension, for deriving a display filename. */
+const LANGUAGE_EXTENSION: Record<string, string> = {
+  JSON: "json",
+  Python: "py",
+  SQL: "sql",
+  HTML: "html",
+  TypeScript: "ts",
+  JavaScript: "js",
+};
+
+/**
+ * Derives a `snippet.<ext>`-shaped display filename for a `POST /snippets`
+ * submission from its detected language, falling back to `snippet.txt`
+ * when the guess is empty or unrecognized ("Code").
+ */
+export function snippetFilename(code: string): string {
+  const ext = LANGUAGE_EXTENSION[detectLanguage(code)] ?? "txt";
+  return `snippet.${ext}`;
+}

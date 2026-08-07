@@ -363,6 +363,12 @@ export function ComposerScreen({ state, actions }: ComposerScreenProps) {
               onRepoUrlInput={actions.onRepoUrlInput}
               onSubmitRepoUrl={actions.submitRepoUrl}
               onClearError={actions.clearRepoUrlError}
+              snippetPasteInput={state.snippetPasteInput}
+              snippetPasteLoading={state.snippetPasteLoading}
+              snippetPasteError={state.snippetPasteError}
+              onSnippetPasteInput={actions.onSnippetPasteInput}
+              onSubmitSnippetPaste={actions.submitSnippetPaste}
+              onClearSnippetPasteError={actions.clearSnippetPasteError}
             />
           )}
           {state.scopeMenuOpen && (

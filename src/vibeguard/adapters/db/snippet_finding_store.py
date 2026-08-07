@@ -7,6 +7,13 @@ from vibeguard.adapters.db.snippet_finding_model import SnippetFindingModel
 from vibeguard.core.finding import Finding
 
 
+def get_snippet_finding_by_id(
+    session: Session, snippet_finding_id: int
+) -> SnippetFindingModel | None:
+    """Fetch one snippet finding by id, or `None` if it doesn't exist."""
+    return session.get(SnippetFindingModel, snippet_finding_id)
+
+
 def delete_findings_for_snippet(session: Session, snippet_id: int) -> None:
     """Delete every prior finding for a snippet (rescans replace, not accumulate)."""
     session.execute(delete(SnippetFindingModel).where(SnippetFindingModel.snippet_id == snippet_id))

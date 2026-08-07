@@ -50,6 +50,21 @@ async def handle_snippet_not_ready_for_scan(request: Request, exc: Exception) ->
     return JSONResponse(status_code=409, content={"detail": str(exc)})
 
 
+async def handle_snippet_finding_not_found(request: Request, exc: Exception) -> JSONResponse:
+    """Return 404 when the requested finding id doesn't exist for this snippet."""
+    return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+
+async def handle_snippet_fix_submission_not_found(request: Request, exc: Exception) -> JSONResponse:
+    """Return 404 when the finding exists but has no fix submitted yet."""
+    return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+
+async def handle_snippet_fix_content_invalid(request: Request, exc: Exception) -> JSONResponse:
+    """Return 422 when submitted fix content is empty or over the size budget."""
+    return JSONResponse(status_code=422, content={"detail": str(exc)})
+
+
 async def handle_unauthenticated(request: Request, exc: Exception) -> JSONResponse:
     """Return 401 when a request's bearer token is missing, invalid, or expired."""
     return JSONResponse(status_code=401, content={"detail": str(exc)})
