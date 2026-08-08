@@ -50,6 +50,23 @@
 
 ### Fixed
 
+- Backend, `POST /repositories/{id}/remediate`
+  (`engine/remediation_generation.py`): a repository with status
+  `scan_failed` is now eligible for remediation, not just `scanned`.
+  `scan_failed` means every LLM-requiring confirmation call errored
+  during scanning — it does not mean zero findings exist, since
+  heuristic-only checks never touch the LLM and can still produce real,
+  stored findings on a `scan_failed` repository (`GET
+  /repositories/{id}/findings` already reflects this, with no status
+  gate at all). Previously the remediate route hard-blocked every
+  non-`scanned` status uniformly with a `409`, making those
+  heuristic-only findings permanently unreachable for remediation. A
+  `scan_failed` repository with no stored findings now gets the same
+  empty-outcome `200` (`attempted: 0`) as a `scanned` repository with no
+  findings, instead of a separate rejection. Every other non-`scanned`
+  status (`pending`, `cloning`, `storing`,
+  `scan_pending_implementation`, `scanning`, `rejected`) is unaffected
+  and still returns `409`.
 - Frontend, composer file-preview chips (`AttachmentChips.tsx`,
   `useVibecheckFlow.ts`): after connecting a real GitHub repository, the
   preview list no longer comes from a separate, redundant,

@@ -15,7 +15,7 @@ from vibeguard.adapters.llm.remediation_client import (
     RemediationUnavailableError,
 )
 from vibeguard.core.finding import Finding, FindingSource
-from vibeguard.core.repository_status import RepositoryStatus
+from vibeguard.core.repository_status import RejectionReason, RepositoryStatus
 from vibeguard.core.severity import Severity
 from vibeguard.core.vuln_category import VulnCategory
 from vibeguard.engine.remediation_generation import (
@@ -28,7 +28,12 @@ from vibeguard.engine.remediation_generation import (
 def _make_repository(
     session: Session, status: RepositoryStatus = RepositoryStatus.SCANNED
 ) -> RepositoryModel:
-    repository = RepositoryModel(source_url="u", owner="o", name="r", status=status)
+    rejection_reason = (
+        RejectionReason.NOT_PUBLIC_OR_NOT_FOUND if status == RepositoryStatus.REJECTED else None
+    )
+    repository = RepositoryModel(
+        source_url="u", owner="o", name="r", status=status, rejection_reason=rejection_reason
+    )
     session.add(repository)
     session.flush()
     return repository
@@ -90,6 +95,71 @@ def test_generate_remediations_no_findings_returns_empty_outcome(
     db_session: Session, settings_factory
 ):
     repository = _make_repository(db_session)
+    db_session.flush()
+
+    outcome = generate_remediations_for_repository(
+        repository.id, db_session, llm_client=object(), settings=settings_factory()
+    )
+
+    assert outcome.remediations == []
+    assert outcome.attempted == 0
+    assert outcome.succeeded == 0
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        RepositoryStatus.PENDING,
+        RepositoryStatus.CLONING,
+        RepositoryStatus.STORING,
+        RepositoryStatus.SCAN_PENDING_IMPLEMENTATION,
+        RepositoryStatus.SCANNING,
+        RepositoryStatus.REJECTED,
+    ],
+)
+def test_generate_remediations_non_scanned_non_scan_failed_status_raises(
+    db_session: Session, settings_factory, status: RepositoryStatus
+):
+    repository = _make_repository(db_session, status=status)
+    db_session.flush()
+
+    with pytest.raises(RepositoryNotReadyForRemediationError):
+        generate_remediations_for_repository(
+            repository.id, db_session, llm_client=object(), settings=settings_factory()
+        )
+
+
+def test_generate_remediations_scan_failed_with_findings_succeeds(
+    db_session: Session, settings_factory, monkeypatch: pytest.MonkeyPatch
+):
+    # scan_failed means the LLM-requiring confirmation calls errored, not
+    # that zero findings exist -- heuristic-only findings can still be
+    # stored, and remediation must be reachable for them.
+    repository = _make_repository(db_session, status=RepositoryStatus.SCAN_FAILED)
+    _add_file(db_session, repository, "app.py", "original content")
+    db_session.flush()
+    _add_finding(db_session, repository, "app.py")
+    db_session.flush()
+
+    monkeypatch.setattr(
+        remediation_generation_module,
+        "generate_remediation",
+        Mock(return_value=GeneratedRemediation(proposed_content="fixed", summary="s")),
+    )
+
+    outcome = generate_remediations_for_repository(
+        repository.id, db_session, llm_client=object(), settings=settings_factory()
+    )
+
+    assert outcome.attempted == 1
+    assert outcome.succeeded == 1
+    assert len(outcome.remediations) == 1
+
+
+def test_generate_remediations_scan_failed_with_no_findings_returns_empty_outcome(
+    db_session: Session, settings_factory
+):
+    repository = _make_repository(db_session, status=RepositoryStatus.SCAN_FAILED)
     db_session.flush()
 
     outcome = generate_remediations_for_repository(

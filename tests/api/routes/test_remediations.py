@@ -41,7 +41,7 @@ from vibeguard.api.routes.remediations import router
 from vibeguard.core.finding import Finding, FindingSource
 from vibeguard.core.remediation import RemediationProposal
 from vibeguard.core.remediation_status import RemediationStatus
-from vibeguard.core.repository_status import RepositoryStatus
+from vibeguard.core.repository_status import RejectionReason, RepositoryStatus
 from vibeguard.core.severity import Severity
 from vibeguard.core.vuln_category import VulnCategory
 from vibeguard.engine.remediation_decision import (
@@ -90,8 +90,15 @@ def _build_test_app(
 def _make_repository(
     session: Session, status: RepositoryStatus = RepositoryStatus.SCANNED
 ) -> RepositoryModel:
+    rejection_reason = (
+        RejectionReason.NOT_PUBLIC_OR_NOT_FOUND if status == RepositoryStatus.REJECTED else None
+    )
     repository = RepositoryModel(
-        source_url="u", owner="octocat", name="Hello-World", status=status
+        source_url="u",
+        owner="octocat",
+        name="Hello-World",
+        status=status,
+        rejection_reason=rejection_reason,
     )
     session.add(repository)
     session.flush()
@@ -209,6 +216,83 @@ def test_remediate_repository_not_scanned_returns_409(db_session: Session, setti
     )
     response = client.post(f"/repositories/{repository.id}/remediate")
     assert response.status_code == 409
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        RepositoryStatus.PENDING,
+        RepositoryStatus.CLONING,
+        RepositoryStatus.STORING,
+        RepositoryStatus.SCAN_PENDING_IMPLEMENTATION,
+        RepositoryStatus.SCANNING,
+        RepositoryStatus.REJECTED,
+    ],
+)
+def test_remediate_repository_other_non_scanned_statuses_return_409(
+    db_session: Session, settings_factory, status: RepositoryStatus
+):
+    user = _make_user(db_session)
+    repository = _make_repository(db_session, status)
+    db_session.commit()
+    client = TestClient(
+        _build_test_app(db_session, httpx.Client(), httpx.Client(), settings_factory(), user)
+    )
+    response = client.post(f"/repositories/{repository.id}/remediate")
+    assert response.status_code == 409
+
+
+def test_remediate_repository_scan_failed_with_findings_returns_200(
+    db_session: Session, settings_factory, monkeypatch: pytest.MonkeyPatch
+):
+    # scan_failed means the LLM-requiring confirmation calls errored, not
+    # that zero findings exist -- heuristic-only findings can still be
+    # stored, and remediation must be reachable for them.
+    user = _make_user(db_session)
+    repository = _make_repository(db_session, RepositoryStatus.SCAN_FAILED)
+    db_session.add(
+        RepositoryFileModel(
+            repository_id=repository.id, relative_path="app.py", size_bytes=10, content="original"
+        )
+    )
+    db_session.flush()
+    _make_finding(db_session, repository)
+    db_session.commit()
+
+    monkeypatch.setattr(
+        remediation_generation_module,
+        "generate_remediation",
+        Mock(return_value=GeneratedRemediation(proposed_content="fixed", summary="s")),
+    )
+
+    client = TestClient(
+        _build_test_app(db_session, httpx.Client(), httpx.Client(), settings_factory(), user)
+    )
+    response = client.post(f"/repositories/{repository.id}/remediate")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["attempted"] == 1
+    assert body["succeeded"] == 1
+
+
+def test_remediate_repository_scan_failed_with_no_findings_returns_200_empty(
+    db_session: Session, settings_factory
+):
+    user = _make_user(db_session)
+    repository = _make_repository(db_session, RepositoryStatus.SCAN_FAILED)
+    db_session.commit()
+
+    client = TestClient(
+        _build_test_app(db_session, httpx.Client(), httpx.Client(), settings_factory(), user)
+    )
+    response = client.post(f"/repositories/{repository.id}/remediate")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["attempted"] == 0
+    assert body["succeeded"] == 0
+    assert body["remediations"] == []
 
 
 def test_remediate_repository_happy_path_persists_and_returns_remediations(

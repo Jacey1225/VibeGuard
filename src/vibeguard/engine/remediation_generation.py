@@ -63,20 +63,34 @@ class _FileFindingGroup:
     findings: tuple[FindingModel, ...]
 
 
+_ELIGIBLE_FOR_REMEDIATION = frozenset({RepositoryStatus.SCANNED, RepositoryStatus.SCAN_FAILED})
+
+
 def generate_remediations_for_repository(
     repository_id: int, session: Session, llm_client: httpx.Client, settings: Settings
 ) -> RemediationGenerationOutcome:
-    """Look up a repository, verify it's scanned, and generate remediations for its findings.
+    """Look up a repository, verify it's eligible, and generate remediations for its findings.
+
+    `SCAN_FAILED` means every LLM-requiring confirmation call errored, not
+    that zero findings exist -- heuristic-only checks never touch the LLM
+    and can still produce real, stored findings on a `SCAN_FAILED`
+    repository (see `GET /repositories/{id}/findings`, which likewise has
+    no status gate). So `SCAN_FAILED` is eligible here too; a `SCAN_FAILED`
+    repository with no findings falls through to the same
+    no-groups early return as a `SCANNED` repository with no findings
+    (empty outcome, 200), rather than a separate rejection path -- kept
+    consistent rather than special-cased.
 
     Raises:
         RepositoryNotFoundError: no repository with this id exists.
-        RepositoryNotReadyForRemediationError: the repository hasn't
-            completed a scan (`SCANNED` status).
+        RepositoryNotReadyForRemediationError: the repository is in a
+            status that never allows remediation, regardless of findings
+            (anything other than `SCANNED` or `SCAN_FAILED`).
     """
     repository = get_repository_by_id(session, repository_id)
     if repository is None:
         raise RepositoryNotFoundError(f"no repository with id {repository_id}")
-    if repository.status != RepositoryStatus.SCANNED:
+    if repository.status not in _ELIGIBLE_FOR_REMEDIATION:
         raise RepositoryNotReadyForRemediationError(
             f"repository {repository_id} has status {repository.status.value}, "
             "not ready for remediation"

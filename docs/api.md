@@ -473,10 +473,21 @@ immediately. Requires `Authorization: Bearer <token>`.
 ## `POST /repositories/{id}/remediate`
 
 Requires authentication. Generates a proposed fix for every
-findings-bearing file in a repository that has completed a scan — one
-LLM call per **file** (all of that file's findings are addressed in a
-single call), not one call per finding. Blocks for the whole request,
-the same trade-off as `POST /scan`.
+findings-bearing file in a repository whose status is `scanned` or
+`scan_failed` — one LLM call per **file** (all of that file's findings
+are addressed in a single call), not one call per finding. Blocks for
+the whole request, the same trade-off as `POST /scan`.
+
+`scan_failed` means every LLM-requiring confirmation call errored
+during scanning, not that zero findings exist: heuristic-only checks
+never touch the LLM and can still produce real, stored findings on a
+`scan_failed` repository. So a `scan_failed` repository is eligible for
+remediation exactly like a `scanned` one; a `scan_failed` repository
+with no stored findings gets the same empty-outcome `200` response
+(`attempted: 0`) as a `scanned` repository with no findings — there's
+no separate rejection path for that case. Every other status
+(`pending`, `cloning`, `storing`, `scan_pending_implementation`,
+`scanning`, `rejected`) is still rejected with `409`.
 
 ### Response body
 
@@ -501,8 +512,8 @@ never attempted.
 |---|---|
 | Missing/invalid/expired token | `401` |
 | No repository with this id | `404` |
-| Repository hasn't completed a scan (`status != scanned`) | `409` |
-| Generation ran (regardless of per-file outcomes) | `200` |
+| Repository status isn't `scanned` or `scan_failed` | `409` |
+| Generation ran (regardless of per-file outcomes, including zero findings) | `200` |
 
 ## `GET /repositories/{id}/remediations`
 
