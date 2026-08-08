@@ -11,7 +11,7 @@ import vibeguard.engine.llm_confirmation as llm_confirmation_module
 import vibeguard.engine.vuln_scan as vuln_scan_module
 from vibeguard.adapters.db.finding_store import list_findings_for_repository
 from vibeguard.adapters.db.models import RepositoryFileModel, RepositoryModel
-from vibeguard.adapters.llm.openrouter_client import LlmApiUnavailableError
+from vibeguard.adapters.llm.openrouter_client import LlmApiUnavailableError, LlmAuthOrQuotaError
 from vibeguard.core.finding import Finding, FindingSource
 from vibeguard.core.repository_status import RepositoryStatus, ScanFailureReason
 from vibeguard.core.severity import Severity
@@ -176,6 +176,39 @@ def test_run_scan_total_llm_failure_sets_scan_failed(
     assert updated.status == RepositoryStatus.SCAN_FAILED
     assert updated.scan_failure_reason == ScanFailureReason.LLM_UNAVAILABLE
     assert list_findings_for_repository(db_session, repository.id) == []
+
+
+def test_run_scan_total_llm_failure_persists_manifest_finding_but_drops_heuristic_findings(
+    db_session: Session, settings_factory, monkeypatch: pytest.MonkeyPatch
+):
+    """Reproduces the live incident (repo `id: 16`): heuristics hit on multiple
+    files, every LLM confirmation call is rejected as an auth/quota problem
+    (fast, non-5xx -- the observed live signature of a bad `OPENROUTER_API_KEY`),
+    and the scan lands on `SCAN_FAILED`/`llm_unavailable` with zero
+    heuristic-confirmed findings persisted. Only the LLM-independent
+    dependency-manifest finding survives, exactly as observed live.
+    """
+    repository = _make_repository(db_session)
+    _add_file(db_session, repository, "a.py", 'password = "admin"')
+    _add_file(db_session, repository, "b.py", 'password = "changeme"')
+    _add_file(db_session, repository, "requirements.txt", "fastapi==0.115.6\n")
+    db_session.flush()
+
+    def always_rejected(result, content, client, api_key, model, timeout_seconds, max_tokens):
+        raise LlmAuthOrQuotaError("simulated auth/quota rejection", status_code=401)
+
+    monkeypatch.setattr(llm_confirmation_module, "confirm_findings", always_rejected)
+
+    updated = run_scan(repository, db_session, llm_client=object(), settings=settings_factory())
+
+    assert updated.status == RepositoryStatus.SCAN_FAILED
+    assert updated.scan_failure_reason == ScanFailureReason.LLM_UNAVAILABLE
+
+    findings = list_findings_for_repository(db_session, repository.id)
+    assert len(findings) == 1
+    assert findings[0].category == VulnCategory.VULNERABLE_DEPENDENCIES
+    assert findings[0].source == FindingSource.HEURISTIC_ONLY
+    assert all(finding.source != FindingSource.HEURISTIC_CONFIRMED for finding in findings)
 
 
 def test_run_scan_caps_llm_calls_and_marks_incomplete(

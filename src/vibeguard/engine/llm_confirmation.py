@@ -19,11 +19,7 @@ from dataclasses import dataclass, field
 import httpx
 
 from vibeguard.adapters.config.settings import Settings
-from vibeguard.adapters.llm.openrouter_client import (
-    LlmApiUnavailableError,
-    LlmResponseParseError,
-    confirm_findings,
-)
+from vibeguard.adapters.llm.openrouter_client import LlmConfirmationError, confirm_findings
 from vibeguard.core.finding import Finding
 from vibeguard.core.heuristics.run_heuristics import HeuristicScanResult
 
@@ -111,15 +107,19 @@ def _confirm_one_file(
             settings.llm_request_timeout_seconds,
             settings.llm_max_tokens,
         )
-    except (LlmApiUnavailableError, LlmResponseParseError) as error:
-        # Error type only -- never the exception's full message, which
-        # can echo back response content (code-security: no full
-        # payloads in logs, even on failure).
+    except LlmConfirmationError as error:
+        # Type name + status code only -- never the exception's message
+        # text or response body (code-security: no full payloads in
+        # logs, even on failure). The status code is what makes an
+        # auth/quota rejection (401/403/402/429, `LlmAuthOrQuotaError`)
+        # distinguishable from a genuine provider outage (5xx/network,
+        # `LlmApiUnavailableError`) from logs alone.
         logger.warning(
-            "LLM confirmation failed for %s (categories=%s): %s",
+            "LLM confirmation failed for %s (categories=%s): %s (status_code=%s)",
             result.relative_path,
             [category.value for category in result.categories],
             type(error).__name__,
+            error.status_code,
         )
         return None
 

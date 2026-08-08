@@ -9,6 +9,7 @@ from pydantic import SecretStr
 from tests.conftest import make_mock_http_client
 from vibeguard.adapters.llm.openrouter_client import (
     LlmApiUnavailableError,
+    LlmAuthOrQuotaError,
     LlmResponseParseError,
     confirm_findings,
 )
@@ -189,7 +190,7 @@ def test_confirm_findings_server_error_raises_unavailable():
         return httpx.Response(503, text="service unavailable")
 
     client = make_mock_http_client(handler)
-    with pytest.raises(LlmApiUnavailableError):
+    with pytest.raises(LlmApiUnavailableError) as excinfo:
         confirm_findings(
             _heuristic_result(),
             content="x",
@@ -199,6 +200,30 @@ def test_confirm_findings_server_error_raises_unavailable():
             timeout_seconds=30.0,
             max_tokens=1024,
         )
+    assert excinfo.value.status_code == 503
+
+
+@pytest.mark.parametrize("status_code", [401, 402, 403, 429])
+def test_confirm_findings_auth_or_quota_status_raises_distinct_error(status_code: int):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(status_code, text="secret leaked upstream detail, do not log me")
+
+    client = make_mock_http_client(handler)
+    with pytest.raises(LlmAuthOrQuotaError) as excinfo:
+        confirm_findings(
+            _heuristic_result(),
+            content="x",
+            client=client,
+            api_key=_API_KEY,
+            model="m",
+            timeout_seconds=30.0,
+            max_tokens=1024,
+        )
+
+    assert excinfo.value.status_code == status_code
+    # code-security: the exception message carries the status code, never
+    # the response body text.
+    assert "secret leaked upstream detail" not in str(excinfo.value)
 
 
 def test_confirm_findings_network_error_raises_unavailable():
@@ -223,7 +248,7 @@ def test_confirm_findings_non_200_non_5xx_raises_parse_error():
         return httpx.Response(400, text="bad request")
 
     client = make_mock_http_client(handler)
-    with pytest.raises(LlmResponseParseError):
+    with pytest.raises(LlmResponseParseError) as excinfo:
         confirm_findings(
             _heuristic_result(),
             content="x",
@@ -233,6 +258,7 @@ def test_confirm_findings_non_200_non_5xx_raises_parse_error():
             timeout_seconds=30.0,
             max_tokens=1024,
         )
+    assert excinfo.value.status_code == 400
 
 
 def test_confirm_findings_sends_authorization_header_with_unwrapped_key():

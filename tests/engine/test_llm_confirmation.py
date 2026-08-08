@@ -1,11 +1,12 @@
 """Tests for the shared LLM-confirmation logic used by every scan pipeline."""
 
+import logging
 from unittest.mock import Mock
 
 import pytest
 
 import vibeguard.engine.llm_confirmation as llm_confirmation_module
-from vibeguard.adapters.llm.openrouter_client import LlmApiUnavailableError
+from vibeguard.adapters.llm.openrouter_client import LlmApiUnavailableError, LlmAuthOrQuotaError
 from vibeguard.core.finding import Finding, FindingSource
 from vibeguard.core.heuristics.run_heuristics import HeuristicScanResult
 from vibeguard.core.severity import Severity
@@ -100,6 +101,59 @@ def test_confirm_flagged_files_logs_and_continues_past_a_failing_call(
     assert outcome.attempted_calls == 1
     assert outcome.successful_calls == 0
     assert outcome.findings == []
+
+
+def test_confirm_flagged_files_logs_status_code_distinguishing_auth_from_outage(
+    settings_factory, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    """The failure log must carry enough to tell a bad key apart from a real outage.
+
+    Regression coverage for the diagnostic gap that made the live
+    "every LLM call fails" incident (root-caused as a likely bad/expired
+    `OPENROUTER_API_KEY`) slow to distinguish from a genuine provider
+    outage using only server logs.
+    """
+
+    def rejected_as_auth_problem(
+        result, content, client, api_key, model, timeout_seconds, max_tokens
+    ):
+        raise LlmAuthOrQuotaError("OpenRouter rejected the request", status_code=401)
+
+    monkeypatch.setattr(llm_confirmation_module, "confirm_findings", rejected_as_auth_problem)
+
+    with caplog.at_level(logging.WARNING, logger=llm_confirmation_module.__name__):
+        outcome = confirm_flagged_files(
+            [_result("a.py")], {"a.py": "content"}, llm_client=object(), settings=settings_factory()
+        )
+
+    assert outcome.successful_calls == 0
+    [record] = caplog.records
+    assert "LlmAuthOrQuotaError" in record.message
+    assert "401" in record.message
+
+
+def test_confirm_flagged_files_log_never_contains_response_body_text(
+    settings_factory, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    def rejected_with_body(result, content, client, api_key, model, timeout_seconds, max_tokens):
+        raise LlmAuthOrQuotaError(
+            "OpenRouter rejected the request with status 401 "
+            "(likely an invalid/expired API key or exhausted quota)",
+            status_code=401,
+        )
+
+    monkeypatch.setattr(llm_confirmation_module, "confirm_findings", rejected_with_body)
+
+    with caplog.at_level(logging.WARNING, logger=llm_confirmation_module.__name__):
+        confirm_flagged_files(
+            [_result("a.py")], {"a.py": "content"}, llm_client=object(), settings=settings_factory()
+        )
+
+    [record] = caplog.records
+    # Only the type name and status code are logged -- never the
+    # exception's message text, which could otherwise carry response
+    # body content (code-security).
+    assert "OpenRouter rejected the request" not in record.message
 
 
 def test_derive_scan_completion_no_calls_attempted_is_not_a_failure():

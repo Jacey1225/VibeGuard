@@ -38,12 +38,45 @@ _SYSTEM_MESSAGE = (
 )
 
 
-class LlmApiUnavailableError(RuntimeError):
-    """Raised when OpenRouter can't be reached or fails unexpectedly."""
+class LlmConfirmationError(RuntimeError):
+    """Base for every LLM-confirmation failure; carries the HTTP status when known.
+
+    `status_code` is a small integer and safe to log on its own. The
+    exception *message* must never embed response body/payload content
+    (code-security: no full payloads in logs) -- callers that log these
+    errors should log `type(error).__name__` and `error.status_code`,
+    not `str(error)`.
+    """
+
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
-class LlmResponseParseError(RuntimeError):
+class LlmApiUnavailableError(LlmConfirmationError):
+    """Raised on a network failure/timeout, or a provider-side (5xx) error.
+
+    Signals the provider itself is unreachable or degraded -- distinct
+    from `LlmAuthOrQuotaError` (our credentials/quota are the problem).
+    """
+
+
+class LlmAuthOrQuotaError(LlmConfirmationError):
+    """Raised when OpenRouter rejects the request as an auth or quota problem.
+
+    Covers 401/403 (missing, invalid, or unauthorized API key) and
+    402/429 (payment required / rate-limited or out of credit). This is
+    the fast-rejection signature of a bad or depleted API key: it
+    completes near-instantly, unlike a genuine timeout against an
+    unreachable provider (`LlmApiUnavailableError`).
+    """
+
+
+class LlmResponseParseError(LlmConfirmationError):
     """Raised when OpenRouter's response isn't valid, schema-conforming JSON."""
+
+
+_AUTH_OR_QUOTA_STATUS_CODES = frozenset({401, 402, 403, 429})
 
 
 class _LlmFindingItem(BaseModel):
@@ -77,6 +110,10 @@ def confirm_findings(
     Raises:
         LlmApiUnavailableError: network failure, timeout, or a
             provider-side (5xx) error.
+        LlmAuthOrQuotaError: OpenRouter rejected the request as an
+            auth/quota problem (401/403/402/429) -- almost always a bad,
+            expired, or depleted `OPENROUTER_API_KEY`, not a provider
+            outage.
         LlmResponseParseError: the response wasn't valid, schema-
             conforming JSON.
     """
@@ -140,11 +177,31 @@ def _send_request(
 
 
 def _parse_response(response: httpx.Response) -> _LlmFindingsResponse:
-    if response.status_code >= 500:
-        raise LlmApiUnavailableError(f"OpenRouter returned {response.status_code}")
-    if response.status_code != 200:
+    """Turn a raw HTTP response into a validated findings payload.
+
+    Status-code branches are ordered and kept mutually exclusive so each
+    failure mode raises a distinct, log-distinguishable exception type
+    (status code only -- never response body/payload text, per
+    code-security):
+      - 5xx -> `LlmApiUnavailableError` (provider outage/degradation).
+      - 401/403/402/429 -> `LlmAuthOrQuotaError` (our key/quota).
+      - any other non-200 -> `LlmResponseParseError` (unexpected status).
+      - 200 with a body that doesn't parse/validate -> `LlmResponseParseError`.
+    """
+    status_code = response.status_code
+    if status_code >= 500:
+        raise LlmApiUnavailableError(
+            f"OpenRouter returned status {status_code}", status_code=status_code
+        )
+    if status_code in _AUTH_OR_QUOTA_STATUS_CODES:
+        raise LlmAuthOrQuotaError(
+            f"OpenRouter rejected the request with status {status_code} "
+            "(likely an invalid/expired API key or exhausted quota)",
+            status_code=status_code,
+        )
+    if status_code != 200:
         raise LlmResponseParseError(
-            f"OpenRouter returned {response.status_code}: {response.text[:200]}"
+            f"OpenRouter returned unexpected status {status_code}", status_code=status_code
         )
 
     raw_content = _extract_message_content(response)
@@ -154,7 +211,9 @@ def _parse_response(response: httpx.Response) -> _LlmFindingsResponse:
         return _LlmFindingsResponse.model_validate_json(cleaned)
     except ValidationError as error:
         raise LlmResponseParseError(
-            f"model response wasn't valid JSON matching the schema: {error}"
+            f"model response wasn't valid JSON matching the schema "
+            f"({error.error_count()} validation error(s))",
+            status_code=status_code,
         ) from error
 
 
@@ -163,7 +222,10 @@ def _extract_message_content(response: httpx.Response) -> str:
         envelope = response.json()
         content: str = envelope["choices"][0]["message"]["content"]
     except (ValueError, KeyError, IndexError, TypeError) as error:
-        raise LlmResponseParseError(f"unexpected OpenRouter response shape: {error}") from error
+        raise LlmResponseParseError(
+            f"unexpected OpenRouter response shape ({type(error).__name__})",
+            status_code=response.status_code,
+        ) from error
     return content
 
 
