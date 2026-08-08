@@ -50,6 +50,22 @@
 
 ### Fixed
 
+- Frontend, composer file-preview chips (`AttachmentChips.tsx`,
+  `useVibecheckFlow.ts`): after connecting a real GitHub repository, the
+  preview list no longer comes from a separate, redundant,
+  unauthenticated call straight to GitHub's non-recursive `contents` API
+  (root directory only — every subdirectory file was silently dropped)
+  with a fallback to three hardcoded fixture filenames whenever that call
+  came back empty, which was the common case and the literal source of
+  "only takes a maximum of 3 seemingly random files." The real backend
+  intake/walk pipeline (`src/vibeguard/engine/intake.py`) was never
+  affected by this — it already scans every stored file — so this is a
+  UI-truthfulness fix, not a scan-coverage fix. The composer now shows a
+  single summary chip (`N files ready to scan`, with a truncation note
+  when applicable) built entirely from `POST /repositories`'s own
+  `total_files_stored`/`files_truncated`, and the ~70-line block
+  previously duplicated verbatim between `connectSuggestedRepo` and
+  `submitRepoUrl` is now one shared helper.
 - Frontend, real-findings Decide screen (`RealFindingCard.tsx`): file
   preview now calls the new `GET /repositories/{id}/files/preview`
   instead of an unauthenticated, per-card `fetch` straight to

@@ -15,6 +15,21 @@ export interface RepositoryFile {
   isEllipsis?: boolean;
 }
 
+/**
+ * Composer's "repo connected" summary -- built entirely from fields
+ * `POST /repositories` already returns once the backend has cloned and
+ * walked the whole repository (`total_files_stored`, `files_truncated`;
+ * see `RepositoryResponse` in `src/vibeguard/api/schemas.py`). Replaces a
+ * prior per-file preview that made its own redundant, unauthenticated,
+ * non-recursive call straight to GitHub's `contents` API and fell back to
+ * hardcoded fixture filenames when that call (predictably) returned
+ * nothing useful -- see intake spec 20260807-repo-file-preview-truncated.
+ */
+export interface RepositoryFileSummary {
+  totalFiles: number;
+  filesTruncated: boolean;
+}
+
 export type RealFindingSeverity = "info" | "low" | "medium" | "high" | "critical";
 
 export interface RealFinding {
@@ -112,6 +127,7 @@ export interface VibecheckState {
   repoUrlError: string | null;
   repoId: string | null;
   attachedFiles: RepositoryFile[];
+  attachedRepoSummary: RepositoryFileSummary | null;
   suggestedRepoUrl: string | null;
   scanResults: string;
   scanResultsLoading: boolean;
@@ -222,6 +238,22 @@ export function getApiBaseUrl(): string {
   return url;
 }
 
+/**
+ * Builds the composer's connected-repo summary straight from a
+ * `POST /repositories` response -- no separate fetch, no client-side
+ * guessing. `total_files_stored`/`files_truncated` are always present on
+ * a successful (`scan_pending_implementation`) response; the type guards
+ * here only cover a malformed/unexpected body, matching how the rest of
+ * this file treats fetch responses as untyped JSON.
+ */
+function buildAttachedRepoSummary(data: unknown): RepositoryFileSummary {
+  const body = (data ?? {}) as { total_files_stored?: unknown; files_truncated?: unknown };
+  return {
+    totalFiles: typeof body.total_files_stored === "number" ? body.total_files_stored : 0,
+    filesTruncated: body.files_truncated === true,
+  };
+}
+
 function initialState(): VibecheckState {
   const scopeSelected: Record<string, boolean> = {};
   for (const item of SCOPE_ITEMS) scopeSelected[item.key] = true;
@@ -252,6 +284,7 @@ function initialState(): VibecheckState {
     repoUrlError: null,
     repoId: null,
     attachedFiles: [],
+    attachedRepoSummary: null,
     suggestedRepoUrl: null,
     scanResults: "",
     scanResultsLoading: false,
@@ -629,117 +662,76 @@ export function useVibecheckFlow(options: VibecheckOptions = {}) {
       attached: false,
       sourceLabel: "",
       attachedFiles: [],
+      attachedRepoSummary: null,
       repoId: null,
     });
   }, [patch]);
 
-  const connectSuggestedRepo = useCallback(async (repoUrl: string) => {
-    patch({ repoUrlInput: repoUrl, suggestedRepoUrl: null });
+  /**
+   * Shared success/failure handling for `POST /repositories`, used by both
+   * `connectSuggestedRepo` (the composer's auto-detected-URL "Connect"
+   * button) and `submitRepoUrl` (the source menu's manual URL field) --
+   * previously duplicated here verbatim (~70 lines each), including a
+   * redundant, unauthenticated, non-recursive call straight to GitHub's
+   * `contents` API for a cosmetic file preview that silently dropped every
+   * subdirectory file and fell back to hardcoded fixture filenames when it
+   * (predictably) came back empty. See intake spec
+   * 20260807-repo-file-preview-truncated. `extraOnSuccess` covers the one
+   * real behavioral difference between the two callers: `connectSuggestedRepo`
+   * also clears `codeInput`, since the URL it's submitting came from text
+   * the user had been typing there.
+   */
+  const connectRepository = useCallback(
+    async (url: string, extraOnSuccess?: Partial<VibecheckState>) => {
+      patch({ repoUrlLoading: true, repoUrlError: null });
 
-    await new Promise((resolve) => setTimeout(resolve, 50));
-
-    patch({ repoUrlLoading: true, repoUrlError: null });
-
-    try {
-      const response = await fetch(`${getApiBaseUrl()}/repositories`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ repo_url: repoUrl }),
-      });
-
-      const data = await response.json();
-
-      if (data.status === "scan_pending_implementation") {
-        let files: RepositoryFile[] = [];
-        try {
-          const urlParts = repoUrl.replace("https://github.com/", "").split("/");
-          if (urlParts.length >= 2) {
-            const owner = urlParts[0];
-            const repo = urlParts[1];
-            const filesResponse = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents`, {
-              headers: { "Accept": "application/vnd.github.v3+json" },
-            });
-
-            if (filesResponse.ok) {
-              const filesList = await filesResponse.json();
-              if (Array.isArray(filesList)) {
-                const skipExtensions = [".md", ".txt", ".json", ".yml", ".yaml"];
-                const skipFiles = [".gitignore", ".env.example"];
-                const fileObjects = filesList.filter((f) => {
-                  if (f.type !== "file") return false;
-                  const name = f.name.toLowerCase();
-                  if (skipFiles.some((sf) => name === sf || name.startsWith(".env"))) return false;
-                  if (skipExtensions.some((ext) => name.endsWith(ext))) return false;
-                  return true;
-                });
-                const hasMore = fileObjects.length > 5;
-
-                const languageMap: Record<string, string> = {
-                  js: "JavaScript",
-                  ts: "TypeScript",
-                  jsx: "JSX",
-                  tsx: "TSX",
-                  py: "Python",
-                  rb: "Ruby",
-                  go: "Go",
-                  rs: "Rust",
-                  java: "Java",
-                  cs: "C#",
-                  cpp: "C++",
-                  c: "C",
-                  html: "HTML",
-                  css: "CSS",
-                  json: "JSON",
-                  yaml: "YAML",
-                  yml: "YAML",
-                  md: "Markdown",
-                };
-
-                files = fileObjects
-                  .slice(0, 5)
-                  .map((f) => {
-                    const ext = f.name.split(".").pop() || "";
-                    return {
-                      name: f.name,
-                      language: languageMap[ext] || ext.toUpperCase() || "File",
-                    };
-                  });
-
-                if (hasMore) {
-                  files.push({ name: "...", isEllipsis: true });
-                }
-              }
-            }
-          }
-        } catch (err) {
-          // Silently fail on file fetch
-        }
-
-        patch({
-          repoUrlLoading: false,
-          repoId: String(data.id),
-          sourceLabel: repoUrl,
-          attached: true,
-          attachedFiles: files,
-          repoUrlInput: "",
-          sourceMenuOpen: false,
-          codeInput: "",
+      try {
+        const response = await fetch(`${getApiBaseUrl()}/repositories`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ repo_url: url }),
         });
-        runtime.current.inputEl?.focus();
-      } else if (data.status === "rejected") {
-        const friendlyErrors: Record<string, string> = {
-          not_public_or_not_found: "Repository not found or not public",
-          repo_too_large: "Repository is too large to scan",
-          clone_failed: "Failed to clone repository",
-          clone_timeout: "Repository clone timed out",
-        };
-        const errorMsg = friendlyErrors[data.rejection_reason] || data.rejection_reason || "Failed to connect repository";
-        patch({ repoUrlLoading: false, repoUrlError: errorMsg });
+
+        const data = await response.json();
+
+        if (data.status === "scan_pending_implementation") {
+          patch({
+            repoUrlLoading: false,
+            repoId: String(data.id),
+            sourceLabel: url,
+            attached: true,
+            attachedFiles: [],
+            attachedRepoSummary: buildAttachedRepoSummary(data),
+            repoUrlInput: "",
+            sourceMenuOpen: false,
+            ...extraOnSuccess,
+          });
+          runtime.current.inputEl?.focus();
+        } else if (data.status === "rejected") {
+          const friendlyErrors: Record<string, string> = {
+            not_public_or_not_found: "Repository not found or not public",
+            repo_too_large: "Repository is too large to scan",
+            clone_failed: "Failed to clone repository",
+            clone_timeout: "Repository clone timed out",
+          };
+          const errorMsg = friendlyErrors[data.rejection_reason] || data.rejection_reason || "Failed to connect repository";
+          patch({ repoUrlLoading: false, repoUrlError: errorMsg });
+        }
+      } catch (err) {
+        patch({ repoUrlLoading: false, repoUrlError: "Failed to connect to server" });
       }
-    } catch (err) {
-      patch({ repoUrlLoading: false, repoUrlError: "Failed to connect to server" });
-    }
-  }, [patch]);
+    },
+    [patch],
+  );
+
+  const connectSuggestedRepo = useCallback(
+    async (repoUrl: string) => {
+      patch({ repoUrlInput: repoUrl, suggestedRepoUrl: null });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      await connectRepository(repoUrl, { codeInput: "" });
+    },
+    [connectRepository, patch],
+  );
   const onComposerFocus = useCallback(() => patch({ composerFocused: true }), [patch]);
   const onComposerBlur = useCallback(() => patch({ composerFocused: false }), [patch]);
   const toggleSourceMenu = useCallback(
@@ -783,108 +775,8 @@ export function useVibecheckFlow(options: VibecheckOptions = {}) {
   const submitRepoUrl = useCallback(async () => {
     const url = stateRef.current.repoUrlInput.trim();
     if (!url) return;
-
-    patch({ repoUrlLoading: true, repoUrlError: null });
-
-    try {
-      const response = await fetch(`${getApiBaseUrl()}/repositories`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ repo_url: url }),
-      });
-
-      const data = await response.json();
-
-      if (data.status === "scan_pending_implementation") {
-        let files: RepositoryFile[] = [];
-        try {
-          const urlParts = url.replace("https://github.com/", "").split("/");
-          if (urlParts.length >= 2) {
-            const owner = urlParts[0];
-            const repo = urlParts[1];
-            const filesResponse = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents`, {
-              headers: { "Accept": "application/vnd.github.v3+json" },
-            });
-
-            if (filesResponse.ok) {
-              const filesList = await filesResponse.json();
-              if (Array.isArray(filesList)) {
-                const skipExtensions = [".md", ".txt", ".json", ".yml", ".yaml"];
-                const skipFiles = [".gitignore", ".env.example"];
-                const fileObjects = filesList.filter((f) => {
-                  if (f.type !== "file") return false;
-                  const name = f.name.toLowerCase();
-                  if (skipFiles.some((sf) => name === sf || name.startsWith(".env"))) return false;
-                  if (skipExtensions.some((ext) => name.endsWith(ext))) return false;
-                  return true;
-                });
-                const hasMore = fileObjects.length > 5;
-
-                const languageMap: Record<string, string> = {
-                  js: "JavaScript",
-                  ts: "TypeScript",
-                  jsx: "JSX",
-                  tsx: "TSX",
-                  py: "Python",
-                  rb: "Ruby",
-                  go: "Go",
-                  rs: "Rust",
-                  java: "Java",
-                  cs: "C#",
-                  cpp: "C++",
-                  c: "C",
-                  html: "HTML",
-                  css: "CSS",
-                  json: "JSON",
-                  yaml: "YAML",
-                  yml: "YAML",
-                  md: "Markdown",
-                };
-
-                files = fileObjects
-                  .slice(0, 5)
-                  .map((f) => {
-                    const ext = f.name.split(".").pop() || "";
-                    return {
-                      name: f.name,
-                      language: languageMap[ext] || ext.toUpperCase() || "File",
-                    };
-                  });
-
-                if (hasMore) {
-                  files.push({ name: "...", isEllipsis: true });
-                }
-              }
-            }
-          }
-        } catch (err) {
-          // Silently fail on file fetch
-        }
-
-        patch({
-          repoUrlLoading: false,
-          repoId: String(data.id),
-          sourceLabel: url,
-          attached: true,
-          attachedFiles: files,
-          repoUrlInput: "",
-          sourceMenuOpen: false,
-        });
-        runtime.current.inputEl?.focus();
-      } else if (data.status === "rejected") {
-        const friendlyErrors: Record<string, string> = {
-          not_public_or_not_found: "Repository not found or not public",
-          repo_too_large: "Repository is too large to scan",
-          clone_failed: "Failed to clone repository",
-          clone_timeout: "Repository clone timed out",
-        };
-        const errorMsg = friendlyErrors[data.rejection_reason] || data.rejection_reason || "Failed to connect repository";
-        patch({ repoUrlLoading: false, repoUrlError: errorMsg });
-      }
-    } catch (err) {
-      patch({ repoUrlLoading: false, repoUrlError: "Failed to connect to server" });
-    }
-  }, [patch]);
+    await connectRepository(url);
+  }, [connectRepository]);
 
   const pasteExample = useCallback(() => {
     patch({ sourceMenuOpen: false, codeInput: EXAMPLE_CODE });
@@ -1214,6 +1106,7 @@ export function useVibecheckFlow(options: VibecheckOptions = {}) {
       repoUrlError: null,
       repoId: null,
       attachedFiles: [],
+      attachedRepoSummary: null,
       suggestedRepoUrl: null,
       scanResults: "",
       scanResultsLoading: false,

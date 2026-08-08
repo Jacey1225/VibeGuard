@@ -1,73 +1,73 @@
-import type { RepositoryFile } from "../../hooks/useVibecheckFlow";
-import { FILES } from "../../data/fixtures";
+import type { RepositoryFileSummary } from "../../hooks/useVibecheckFlow";
 import { FileIcon } from "../icons";
 
 interface AttachmentChipsProps {
-  files?: RepositoryFile[];
+  summary: RepositoryFileSummary | null;
 }
 
-/** File preview chips shown in the composer once a repo is connected. */
-export function AttachmentChips({ files }: AttachmentChipsProps) {
-  const attachments: RepositoryFile[] =
-    files && files.length > 0 ? files : FILES.slice(0, 3).map((f) => ({ name: f.short, language: f.lang }));
+/**
+ * Composer's "repo connected" indicator. Renders a single truthful chip
+ * built from data the backend already verified when it cloned and walked
+ * the repository (`POST /repositories`'s `total_files_stored` /
+ * `files_truncated` -- see `RepositoryResponse` in
+ * `src/vibeguard/api/schemas.py`), never a per-file listing.
+ *
+ * A prior version rendered up to five chips from a separate, redundant,
+ * unauthenticated call straight to GitHub's non-recursive `contents` API
+ * (root directory only -- every subdirectory file was silently dropped),
+ * and fell back to three hardcoded fixture filenames unrelated to the
+ * submitted repo whenever that call returned nothing (the common case).
+ * Both defects are gone, not patched: there's no client-side per-file
+ * guess left to get wrong, and no fallback data left to show by mistake.
+ * See intake spec 20260807-repo-file-preview-truncated.
+ */
+export function AttachmentChips({ summary }: AttachmentChipsProps) {
+  if (!summary) return null;
+
+  const label = summary.totalFiles === 1 ? "1 file" : `${summary.totalFiles} files`;
 
   return (
     <div style={{ display: "flex", alignItems: "stretch", gap: 10, flexWrap: "wrap" }}>
-      {attachments.map((file) => {
-        const isEllipsis = "isEllipsis" in file && file.isEllipsis;
-
-        return (
-          <div
-            key={isEllipsis ? "ellipsis" : file.name}
+      <div
+        style={{
+          padding: "12px 14px",
+          boxSizing: "border-box",
+          borderRadius: 18,
+          background: "rgba(255,255,255,0.05)",
+          border: "1px solid rgba(255,255,255,0.12)",
+          display: "flex",
+          flexDirection: "column",
+          animation: "vc-rise 0.3s cubic-bezier(0.22,1,0.36,1)",
+          justifyContent: "center",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <FileIcon size={14} style={{ flexShrink: 0 }} />
+          <span
             style={{
-              width: isEllipsis ? "auto" : 132,
-              padding: isEllipsis ? "12px 14px" : "12px 14px",
-              boxSizing: "border-box",
-              borderRadius: 18,
-              background: isEllipsis ? "transparent" : "rgba(255,255,255,0.05)",
-              border: isEllipsis ? "none" : "1px solid rgba(255,255,255,0.12)",
-              display: "flex",
-              flexDirection: "column",
-              animation: "vc-rise 0.3s cubic-bezier(0.22,1,0.36,1)",
-              justifyContent: "center",
+              fontSize: 12.5,
+              fontWeight: 600,
+              color: "rgba(255,255,255,0.85)",
+              whiteSpace: "nowrap",
             }}
           >
-            {isEllipsis ? (
-              <span
-                style={{
-                  fontSize: 16,
-                  fontWeight: 600,
-                  color: "rgba(255,255,255,0.45)",
-                  lineHeight: 1,
-                }}
-              >
-                {file.name}
-              </span>
-            ) : (
-              <>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <FileIcon size={14} style={{ flexShrink: 0 }} />
-                  <span
-                    style={{
-                      fontSize: 12.5,
-                      fontWeight: 600,
-                      color: "rgba(255,255,255,0.85)",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {file.name}
-                  </span>
-                </div>
-                <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "rgba(255,255,255,0.35)", marginTop: 8 }}>
-                  {file.language || "File"}
-                </span>
-              </>
-            )}
-          </div>
-        );
-      })}
+            {label} ready to scan
+          </span>
+        </div>
+        {summary.filesTruncated && (
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: "0.02em",
+              color: "rgba(255,255,255,0.35)",
+              marginTop: 8,
+            }}
+          >
+            Repo is larger than the scan limit — some files were skipped
+          </span>
+        )}
+      </div>
     </div>
   );
 }

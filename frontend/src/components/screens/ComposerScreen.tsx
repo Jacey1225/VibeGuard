@@ -182,7 +182,7 @@ export function ComposerScreen({ state, actions }: ComposerScreenProps) {
             </div>
           )}
 
-          {state.attached && <AttachmentChips files={state.attachedFiles} />}
+          {state.attached && <AttachmentChips summary={state.attachedRepoSummary} />}
 
           <textarea
             ref={actions.setInputRef}

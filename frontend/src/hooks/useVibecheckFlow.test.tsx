@@ -167,15 +167,15 @@ describe("useVibecheckFlow", () => {
     vi.unstubAllEnvs();
   });
 
-  it("runPipeline's scan and findings requests route through VITE_VIBECHECK_API_URL, while the GitHub file listing stays on api.github.com", async () => {
+  it("runPipeline's scan and findings requests route through VITE_VIBECHECK_API_URL, with no call to api.github.com anywhere in the connect+scan path", async () => {
     vi.stubEnv("VITE_VIBECHECK_API_URL", "https://configured-backend.example");
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "https://configured-backend.example/repositories") {
-        return { ok: true, json: async () => ({ status: "scan_pending_implementation", id: 42 }) } as Response;
-      }
-      if (url.startsWith("https://api.github.com/")) {
-        return { ok: false, json: async () => [] } as Response;
+        return {
+          ok: true,
+          json: async () => ({ status: "scan_pending_implementation", id: 42, total_files_stored: 3, files_truncated: false }),
+        } as Response;
       }
       if (url === "https://configured-backend.example/repositories/42/scan") {
         return {
@@ -217,10 +217,99 @@ describe("useVibecheckFlow", () => {
     const calledUrls = fetchSpy.mock.calls.map((call) => String(call[0]));
     expect(calledUrls).toContain("https://configured-backend.example/repositories/42/scan");
     expect(calledUrls).toContain("https://configured-backend.example/repositories/42/findings");
-    expect(calledUrls.some((u) => u.startsWith("https://api.github.com/repos/acme/widgets/contents"))).toBe(true);
+    expect(calledUrls.some((u) => u.startsWith("https://api.github.com/"))).toBe(false);
 
     fetchSpy.mockRestore();
     vi.unstubAllEnvs();
+  });
+
+  /**
+   * Regression coverage for intake spec 20260807-repo-file-preview-truncated:
+   * a connected repository's file preview used to come from a separate,
+   * unauthenticated, non-recursive call straight to GitHub's `contents`
+   * API, which silently dropped every subdirectory file and, once it
+   * (predictably) came back empty, fell back to three hardcoded fixture
+   * filenames unrelated to the submitted repo -- the literal source of
+   * "only takes a maximum of 3 seemingly random files." Both
+   * `connectSuggestedRepo` and `submitRepoUrl` now build the composer's
+   * connected-repo summary straight from `POST /repositories`'s own
+   * `total_files_stored`/`files_truncated`, with no separate fetch and no
+   * fixture data involved.
+   */
+  describe("connected-repo file summary (no GitHub API call, no fixture fallback)", () => {
+    it("submitRepoUrl builds attachedRepoSummary from the backend response alone", async () => {
+      vi.stubEnv("VITE_VIBECHECK_API_URL", "https://configured-backend.example");
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        json: async () => ({ status: "scan_pending_implementation", id: 7, total_files_stored: 142, files_truncated: true }),
+      } as Response);
+
+      const { result } = renderHook(() => useVibecheckFlow());
+      act(() =>
+        result.current.actions.onRepoUrlInput(
+          ({ target: { value: "https://github.com/acme/widgets" } }) as ChangeEvent<HTMLInputElement>,
+        ),
+      );
+      await act(async () => {
+        await result.current.actions.submitRepoUrl();
+      });
+
+      expect(result.current.state.attachedRepoSummary).toEqual({ totalFiles: 142, filesTruncated: true });
+      expect(result.current.state.attachedFiles).toEqual([]);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(String(fetchSpy.mock.calls[0][0])).toBe("https://configured-backend.example/repositories");
+
+      fetchSpy.mockRestore();
+      vi.unstubAllEnvs();
+    });
+
+    it("connectSuggestedRepo builds attachedRepoSummary from the backend response alone", async () => {
+      vi.stubEnv("VITE_VIBECHECK_API_URL", "https://configured-backend.example");
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        json: async () => ({ status: "scan_pending_implementation", id: 9, total_files_stored: 5, files_truncated: false }),
+      } as Response);
+
+      const { result } = renderHook(() => useVibecheckFlow());
+      await act(async () => {
+        const pending = result.current.actions.connectSuggestedRepo("https://github.com/acme/widgets");
+        await vi.advanceTimersByTimeAsync(60);
+        await pending;
+      });
+
+      expect(result.current.state.attachedRepoSummary).toEqual({ totalFiles: 5, filesTruncated: false });
+      expect(result.current.state.attachedFiles).toEqual([]);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(String(fetchSpy.mock.calls[0][0])).toBe("https://configured-backend.example/repositories");
+
+      fetchSpy.mockRestore();
+      vi.unstubAllEnvs();
+    });
+
+    it("disconnectRepo clears attachedRepoSummary along with the rest of the connected-repo state", async () => {
+      vi.stubEnv("VITE_VIBECHECK_API_URL", "https://configured-backend.example");
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        json: async () => ({ status: "scan_pending_implementation", id: 7, total_files_stored: 12, files_truncated: false }),
+      } as Response);
+
+      const { result } = renderHook(() => useVibecheckFlow());
+      act(() =>
+        result.current.actions.onRepoUrlInput(
+          ({ target: { value: "https://github.com/acme/widgets" } }) as ChangeEvent<HTMLInputElement>,
+        ),
+      );
+      await act(async () => {
+        await result.current.actions.submitRepoUrl();
+      });
+      expect(result.current.state.attachedRepoSummary).not.toBeNull();
+
+      act(() => result.current.actions.disconnectRepo());
+      expect(result.current.state.attachedRepoSummary).toBeNull();
+
+      fetchSpy.mockRestore();
+      vi.unstubAllEnvs();
+    });
   });
 
   it("resetFlow returns to the composer with every finding back to pending", () => {
